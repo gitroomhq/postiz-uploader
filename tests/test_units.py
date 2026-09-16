@@ -8,7 +8,7 @@ import pytest
 from postiz_uploader.download import host_allowed
 from postiz_uploader.ffmpeg import build_encode, build_remux
 from postiz_uploader.log import redact_url
-from postiz_uploader.planner import Plan
+from postiz_uploader.planner import ENCODE, Plan
 from postiz_uploader.probe import _rotation, isobmff_faststart
 from postiz_uploader.schema import VideoRules
 from postiz_uploader.sniff import sniff
@@ -180,3 +180,48 @@ def test_workdir_env_is_used(monkeypatch, tmp_path):
     assert settings.worker_concurrency == 8
     assert settings.gpu is True
     assert os.environ["ALLOWED_SOURCE_HOSTS"]
+
+
+def _encode_attempts(monkeypatch, tmp_path, fail_until: int):
+    """Drive _run_encode with a fake ffmpeg.run that fails the first `fail_until`
+    attempts, returning the (encoder, cuda) ladder it walked."""
+    from postiz_uploader import ffmpeg as ff
+    from postiz_uploader import video
+    from postiz_uploader.config import Settings
+    from postiz_uploader.schema import parse_job
+
+    calls: list[tuple[str, bool]] = []
+
+    def fake_run(cmd, *, timeout):
+        calls.append(("h264_nvenc" if "h264_nvenc" in cmd else "libx264", "-hwaccel" in cmd))
+        ok = len(calls) > fail_until
+        stderr = "" if ok else "Cannot load libnvidia-encode.so.1"
+        return ff.RunOutcome(returncode=0 if ok else 255, stderr_tail=stderr, seconds=0)
+
+    monkeypatch.setattr(video.ffmpeg, "run", fake_run)
+    job = parse_job(
+        {
+            "version": 1,
+            "type": "video",
+            "reference": "t",
+            "source": {"url": "https://bucket.example.com/in.mp4"},
+            "output": {"url": "https://bucket.example.com/out.mp4", "content_type": "video/mp4"},
+            "rules": {"short_side_min": 1080, "short_side_max": 1080, "long_side_max": 1920},
+        }
+    )
+    plan = Plan(kind=ENCODE, width=1920, height=1030, actions=("scale", "video_encode"), scale=True, video_encode=True)
+    settings = Settings(encoder="h264_nvenc")
+    result = video._run_encode(job, plan, info(), str(tmp_path / "in"), str(tmp_path / "out"), settings, deadline=1e9)
+    return calls, result
+
+
+def test_encode_falls_back_to_libx264_when_nvenc_cannot_open(monkeypatch, tmp_path):
+    calls, (decode, encoder) = _encode_attempts(monkeypatch, tmp_path, fail_until=2)
+    assert calls == [("h264_nvenc", True), ("h264_nvenc", False), ("libx264", False)]
+    assert (decode, encoder) == ("software", "libx264")
+
+
+def test_encode_keeps_nvenc_when_only_cuda_decode_fails(monkeypatch, tmp_path):
+    calls, (decode, encoder) = _encode_attempts(monkeypatch, tmp_path, fail_until=1)
+    assert calls == [("h264_nvenc", True), ("h264_nvenc", False)]
+    assert (decode, encoder) == ("software", "h264_nvenc")

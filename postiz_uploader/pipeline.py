@@ -23,9 +23,11 @@ SNIFF_BYTES = 512
 DISK_WAIT_SECONDS = 5
 
 
-def _worker_block(settings: Settings, decode: str | None) -> dict:
+def _worker_block(settings: Settings, decode: str | None, encoder: str | None = None) -> dict:
     return {
-        "encoder": settings.encoder,
+        # the encoder that actually ran, which differs from the configured one
+        # after a fallback; the configured one when no encode ran
+        "encoder": encoder or settings.encoder,
         "decode": decode,
         "ffmpeg": ffmpeg.version(settings.ffmpeg_bin),
         "gpu": ffmpeg.gpu_name() if settings.gpu else None,
@@ -114,12 +116,14 @@ def process(raw_job: object) -> dict:
             )
 
         decode = None
+        encoder = None
         thumbnail = None
         thumbnail_path = None
         if job.type == "video":
             outcome = process_video(job, input_path, workdir, settings, deadline, timing)
             source = outcome.source.to_dict()
             decode = outcome.decode
+            encoder = outcome.encoder
             thumbnail, thumbnail_path = outcome.thumbnail, outcome.thumbnail_path
         else:
             t = time.monotonic()
@@ -155,7 +159,7 @@ def process(raw_job: object) -> dict:
             output=outcome.output,
             thumbnail=thumbnail,
             timing_ms=timing,
-            worker=_worker_block(settings, decode),
+            worker=_worker_block(settings, decode, encoder),
         )
 
     except JobError as err:

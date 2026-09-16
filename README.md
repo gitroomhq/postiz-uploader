@@ -390,6 +390,13 @@ GPU path for tone mapping is **OPEN** (section 12). Until it is decided, HDR job
 the GPU flavour use software decode plus the CPU filter chain plus NVENC. They are
 correct, just slower, and `actions` records `tonemap` so the caller can see them.
 
+Encoder fallback: some RunPod hosts start the container without
+`libnvidia-encode.so.1` even though the GPU is present, so `h264_nvenc` cannot
+open at all. When both nvenc attempts fail the same plan runs once more with
+`libx264` on the CPU, and `worker.encoder` reports `libx264` so the caller can
+see it happened. It is slow but correct; a host that does this often should be
+excluded from the endpoint.
+
 CUDA decode fallback: NVDEC cannot decode every source (4:2:2 10-bit HEVC from
 iPhones is the usual case, VP8 another). When the CUDA command fails, the worker
 retries the same plan with software decode and NVENC encode, and reports

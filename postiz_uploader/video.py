@@ -28,40 +28,53 @@ class VideoOutcome:
     thumbnail_path: str | None
     thumbnail: dict | None
     decode: str | None  # cuda | software | None (no encode ran)
+    encoder: str | None  # h264_nvenc | libx264 | None (no encode ran)
 
 
 def _remaining(deadline: float) -> float:
     return deadline - time.monotonic()
 
 
-def _run_encode(job: Job, plan: Plan, info: SourceInfo, src: str, dst: str, settings: Settings, deadline: float) -> str:
+def _run_encode(
+    job: Job, plan: Plan, info: SourceInfo, src: str, dst: str, settings: Settings, deadline: float
+) -> tuple[str, str]:
     """Run the ENCODE plan. On the GPU flavour try CUDA decode first and fall back to
     software decode when ffmpeg rejects it (NVDEC cannot decode every source, 4:2:2
-    HEVC from iPhones being the usual case). Returns the decode mode used."""
+    HEVC from iPhones being the usual case), then to libx264 when the encoder itself
+    cannot open (a host whose container lacks libnvidia-encode). Returns the decode
+    mode and the encoder used."""
     rules = job.rules.video
-    attempts: list[bool] = []
-    if settings.gpu and plan.video_encode and not plan.tonemap:
-        attempts.append(True)
-    attempts.append(False)
+    # (encoder, cuda decode) in the order they are tried
+    attempts: list[tuple[str, bool]] = []
+    if settings.gpu and plan.video_encode:
+        if not plan.tonemap:
+            attempts.append((settings.encoder, True))
+        attempts.append((settings.encoder, False))
+        attempts.append(("libx264", False))
+    else:
+        attempts.append((settings.encoder, False))
 
     last: JobError | None = None
-    for cuda in attempts:
-        cmd = ffmpeg.build_encode(
-            settings.ffmpeg_bin, src, dst, plan, info, rules, encoder=settings.encoder, cuda_decode=cuda
-        )
+    for i, (encoder, cuda) in enumerate(attempts):
+        cmd = ffmpeg.build_encode(settings.ffmpeg_bin, src, dst, plan, info, rules, encoder=encoder, cuda_decode=cuda)
         outcome = ffmpeg.run(cmd, timeout=_remaining(deadline))
         if outcome.returncode == 0:
-            return "cuda" if cuda else "software"
+            return ("cuda" if cuda else "software"), encoder
         last = JobError(
             errors.ENCODE_FAILED,
             f"ffmpeg exited with status {outcome.returncode}",
             stderr_tail=outcome.stderr_tail,
         )
-        if cuda:
+        if i + 1 < len(attempts):
+            next_encoder, next_cuda = attempts[i + 1]
             log(
                 logger,
-                "cuda decode failed, retrying with software decode",
+                "encode failed, retrying",
                 reference=job.reference,
+                encoder=encoder,
+                decode="cuda" if cuda else "software",
+                next_encoder=next_encoder,
+                next_decode="cuda" if next_cuda else "software",
                 stderr=outcome.stderr_tail[-500:],
             )
             if os.path.exists(dst):
@@ -120,6 +133,7 @@ def process_video(
     output_path = None
     output = None
     decode = None
+    encoder = None
     frame_source = input_path
     frame_w, frame_h = info.width, info.height
 
@@ -136,7 +150,7 @@ def process_video(
                     stderr_tail=outcome.stderr_tail,
                 )
         else:
-            decode = _run_encode(job, plan, info, input_path, output_path, settings, deadline)
+            decode, encoder = _run_encode(job, plan, info, input_path, output_path, settings, deadline)
         timing["process"] = int((time.monotonic() - t1) * 1000)
 
         out_info = probe(settings.ffprobe_bin, output_path, timeout=min(60, max(_remaining(deadline), 1)))
@@ -185,4 +199,5 @@ def process_video(
         thumbnail_path=thumbnail_path,
         thumbnail=thumbnail,
         decode=decode,
+        encoder=encoder,
     )
