@@ -165,6 +165,7 @@ def build_encode(
             if plan.fps_cap:
                 filters.append(f"fps=fps={plan.fps_cap:g}")
             filters.append(f"scale_npp={plan.width}:{plan.height}:interp_algo=lanczos:format={rules.pixel_format}")
+            filters.append("setsar=1")
         else:
             # autorotate applies the rotate tag before user filters, so the target
             # dimensions (already post-rotation) are correct here
@@ -172,6 +173,7 @@ def build_encode(
                 filters.append(f"fps=fps={plan.fps_cap:g}")
             if plan.scale:
                 filters.append(f"scale={plan.width}:{plan.height}:flags=lanczos")
+                filters.append("setsar=1")
             if plan.tonemap:
                 filters.append(TONEMAP_CPU)
             else:

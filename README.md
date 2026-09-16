@@ -360,7 +360,7 @@ Encode, CPU flavour (`ENCODER=libx264`):
 ```
 ffmpeg -i input
   -map 0:v:0 -map 0:a:0?
-  -vf "<scale>,<fps>,format=yuv420p"                   # scale=W:H:flags=lanczos, fps=fps=60 only when needed
+  -vf "<fps>,<scale>,setsar=1,format=yuv420p"          # scale=W:H:flags=lanczos, fps=fps=60 only when needed
   -c:v libx264 -preset veryfast -crf <quality> -profile:v high -pix_fmt yuv420p
   -c:a aac -b:a <audio_bitrate>k -ar <sample_rate>     # or -c:a copy when audio is already compliant
   -movflags +faststart
@@ -372,7 +372,7 @@ Encode, GPU flavour (`ENCODER=h264_nvenc`), decode and scale stay on the GPU:
 ```
 ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i input
   -map 0:v:0 -map 0:a:0?
-  -vf "scale_npp=W:H:interp_algo=lanczos,<fps>"        # frames never leave GPU memory (scale_cuda needs an nvcc build the base image lacks)
+  -vf "<fps>,scale_npp=W:H:interp_algo=lanczos,setsar=1"  # frames never leave GPU memory (scale_cuda needs an nvcc build the base image lacks)
   -c:v h264_nvenc -preset p4 -tune hq -rc vbr -cq <quality> -b:v 0 -profile:v high -pix_fmt yuv420p
   -c:a aac -b:a <audio_bitrate>k -ar <sample_rate>
   -movflags +faststart
@@ -385,6 +385,12 @@ HDR tone mapping (`needs_tonemap`), CPU path, replaces the scale filter:
 -vf "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,
      zscale=t=bt709:m=bt709:r=tv,format=yuv420p,scale=W:H:flags=lanczos"
 ```
+
+Square pixels: `setsar=1` follows every scale. Rounding W and H to even numbers
+makes the target a hair off the source ratio, and ffmpeg's scale filters compensate
+by writing a sample aspect ratio (1310x702 -> 1920x1028 got 33667:33696, shown as
+1918x1028 by players). Platforms disagree on whether to honour that field, so the
+worker forces 1:1 and accepts the sub-pixel ratio drift instead.
 
 GPU path for tone mapping is **OPEN** (section 12). Until it is decided, HDR jobs on
 the GPU flavour use software decode plus the CPU filter chain plus NVENC. They are

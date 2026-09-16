@@ -103,7 +103,7 @@ def test_encode_command_cpu_shape():
         cuda_decode=False,
     )
     joined = " ".join(cmd)
-    assert "-vf fps=fps=60,scale=1920:1080:flags=lanczos,format=yuv420p" in joined
+    assert "-vf fps=fps=60,scale=1920:1080:flags=lanczos,setsar=1,format=yuv420p" in joined
     assert "-c:v libx264" in joined and "-crf 23" in joined
     assert "-c:a aac" in joined and "-ar 48000" in joined
     assert "-movflags +faststart" in joined
@@ -124,7 +124,7 @@ def test_encode_command_gpu_shape():
     )
     joined = " ".join(cmd)
     assert "-hwaccel cuda -hwaccel_output_format cuda -noautorotate -display_rotation 0" in joined
-    assert "transpose_npp=dir=clock,scale_npp=1080:1920:interp_algo=lanczos:format=yuv420p" in joined
+    assert "transpose_npp=dir=clock,scale_npp=1080:1920:interp_algo=lanczos:format=yuv420p,setsar=1" in joined
     assert "-c:v h264_nvenc" in joined and "-cq 23" in joined
     assert "-c:a copy" in joined
 
@@ -143,7 +143,7 @@ def test_encode_command_tonemap_uses_cpu_chain():
     )
     joined = " ".join(cmd)
     assert "zscale=t=linear" in joined and "tonemap=hable" in joined
-    assert "scale=1920:1080:flags=lanczos,zscale" in joined
+    assert "scale=1920:1080:flags=lanczos,setsar=1,zscale" in joined
     with pytest.raises(ValueError):
         build_encode("ffmpeg", "in", "out.mp4", plan, info(), VideoRules(), encoder="h264_nvenc", cuda_decode=True)
 

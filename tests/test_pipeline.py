@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 
 import pytest
 
@@ -46,6 +47,13 @@ def _out(result: dict):
     return probe(get_settings().ffprobe_bin, result["_output_path"])
 
 
+def _sar(result: dict) -> str:
+    """Sample aspect ratio of the output video stream as ffprobe reports it."""
+    cmd = [get_settings().ffprobe_bin, "-v", "error", "-select_streams", "v:0", "-show_entries",
+           "stream=sample_aspect_ratio", "-of", "csv=p=0", result["_output_path"]]
+    return subprocess.run(cmd, capture_output=True, text=True, check=True).stdout.strip()
+
+
 @pytest.fixture(autouse=True)
 def _work(work_dir):
     yield
@@ -82,6 +90,9 @@ def test_480p_is_upscaled(bucket, fixtures_dir):
     assert r["status"] == "completed", r["failure"]
     assert "scale" in r["actions"]
     assert (r["output"]["width"], r["output"]["height"]) == (1920, 1080)
+    # 854x480 -> 1920x1080 is not an exact ratio; without setsar=1 ffmpeg would write a
+    # 1281:1280 SAR to preserve the display aspect and players would show 1919x1080
+    assert _sar(r) == "1:1"
 
 
 def test_120fps_is_capped(bucket, fixtures_dir):
