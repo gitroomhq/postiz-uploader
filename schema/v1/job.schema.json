@@ -1,0 +1,218 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/gitroomhq/postiz-uploader/schema/v1/job.schema.json",
+  "title": "Job",
+  "type": "object",
+  "required": [
+    "version",
+    "type",
+    "reference",
+    "source",
+    "output",
+    "rules"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "type": {
+      "enum": [
+        "video",
+        "image"
+      ]
+    },
+    "reference": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "source": {
+      "type": "object",
+      "required": [
+        "url"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https?://"
+        },
+        "content_type": {
+          "type": "string"
+        }
+      }
+    },
+    "output": {
+      "type": "object",
+      "required": [
+        "url",
+        "content_type"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https?://"
+        },
+        "content_type": {
+          "type": "string"
+        }
+      }
+    },
+    "thumbnail": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "required": [
+        "url"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https?://"
+        },
+        "timestamp_seconds": {
+          "type": "number",
+          "minimum": 0,
+          "default": 0
+        },
+        "content_type": {
+          "const": "image/jpeg",
+          "default": "image/jpeg"
+        }
+      }
+    },
+    "rules": {
+      "type": "object",
+      "required": [
+        "short_side_min",
+        "short_side_max",
+        "long_side_max"
+      ],
+      "properties": {
+        "short_side_min": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "short_side_max": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "long_side_max": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "video": {
+          "type": "object",
+          "properties": {
+            "container": {
+              "enum": [
+                "mp4"
+              ],
+              "default": "mp4"
+            },
+            "video_codec": {
+              "enum": [
+                "h264"
+              ],
+              "default": "h264"
+            },
+            "profile": {
+              "enum": [
+                "baseline",
+                "main",
+                "high"
+              ],
+              "default": "high"
+            },
+            "pixel_format": {
+              "enum": [
+                "yuv420p"
+              ],
+              "default": "yuv420p"
+            },
+            "fps_max": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "exclusiveMinimum": 0,
+              "default": 60
+            },
+            "quality": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 51,
+              "default": 23
+            },
+            "audio_codec": {
+              "enum": [
+                "aac"
+              ],
+              "default": "aac"
+            },
+            "audio_bitrate_kbps": {
+              "type": "integer",
+              "minimum": 32,
+              "maximum": 512,
+              "default": 128
+            },
+            "audio_sample_rate": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "enum": [
+                44100,
+                48000,
+                null
+              ],
+              "default": 48000
+            },
+            "faststart": {
+              "type": "boolean",
+              "default": true
+            }
+          }
+        },
+        "image": {
+          "type": "object",
+          "properties": {
+            "jpeg_quality": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 90
+            },
+            "keep_format": {
+              "const": true,
+              "default": true
+            }
+          }
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "properties": {
+        "max_input_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1073741824
+        },
+        "max_duration_seconds": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 900
+        },
+        "timeout_seconds": {
+          "type": "number",
+          "minimum": 10,
+          "default": 1200
+        }
+      }
+    }
+  }
+}

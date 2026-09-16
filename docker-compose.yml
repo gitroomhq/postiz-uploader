@@ -1,0 +1,33 @@
+# Local loop: the worker's RunPod-compatible HTTP API on :8000 and a bucket stand-in on :8080.
+#
+#   docker compose up --build
+#   python scripts/make_fixtures.py fixtures/generated
+#   python scripts/run-local.py fixtures/generated/4k-hevc.mov --endpoint http://localhost:8000
+#
+services:
+  bucket:
+    image: python:3.12-slim
+    working_dir: /app
+    volumes:
+      - ./postiz_uploader:/app/postiz_uploader:ro
+      - ./fixtures:/data
+    command: ["python", "-m", "postiz_uploader.devserver", "/data", "--host", "0.0.0.0", "--port", "8080"]
+    ports:
+      - "8080:8080"
+
+  uploader:
+    build:
+      context: .
+      target: cpu
+    environment:
+      ALLOWED_SOURCE_HOSTS: bucket,host.docker.internal
+      WORKER_CONCURRENCY: "1"
+      LOG_LEVEL: info
+    command: ["python", "handler.py", "--rp_serve_api", "--rp_api_host", "0.0.0.0", "--rp_api_port", "8000", "--rp_api_concurrency", "1"]
+    ports:
+      - "8000:8000"
+    # lets run-local.py --bucket-host host.docker.internal serve files from the host
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - bucket

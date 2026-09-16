@@ -1,0 +1,16 @@
+[project]
+name = "postiz-uploader"
+version = "0.1.0"
+description = "Stateless media normalization worker (ffmpeg + Pillow) for RunPod Serverless"
+requires-python = ">=3.10"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

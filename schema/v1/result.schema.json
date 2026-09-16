@@ -1,0 +1,270 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/gitroomhq/postiz-uploader/schema/v1/result.schema.json",
+  "title": "Result",
+  "type": "object",
+  "required": [
+    "version",
+    "reference",
+    "status",
+    "actions"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "reference": {
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "completed",
+        "unchanged",
+        "failed"
+      ]
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "remux",
+          "scale",
+          "video_encode",
+          "audio_encode",
+          "tonemap",
+          "fps_cap",
+          "rotate",
+          "orient"
+        ]
+      }
+    },
+    "source": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "video_codec": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pixel_format": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "color_transfer": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "color_primaries": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "width": {
+          "type": "integer"
+        },
+        "height": {
+          "type": "integer"
+        },
+        "rotation": {
+          "type": "integer"
+        },
+        "fps": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "duration_seconds": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "bytes": {
+          "type": "integer"
+        },
+        "audio_codec": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "audio_sample_rate": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "faststart": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "format": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "animated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "output": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "width": {
+          "type": "integer"
+        },
+        "height": {
+          "type": "integer"
+        },
+        "duration_seconds": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "bytes": {
+          "type": "integer"
+        },
+        "content_type": {
+          "type": "string"
+        },
+        "video_codec": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "audio_codec": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fps": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      }
+    },
+    "thumbnail": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "width": {
+          "type": "integer"
+        },
+        "height": {
+          "type": "integer"
+        },
+        "bytes": {
+          "type": "integer"
+        }
+      }
+    },
+    "timing_ms": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer"
+      }
+    },
+    "worker": {
+      "type": "object",
+      "properties": {
+        "encoder": {
+          "type": "string"
+        },
+        "decode": {
+          "enum": [
+            "cuda",
+            "software",
+            null
+          ]
+        },
+        "ffmpeg": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "gpu": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "version": {
+          "type": "string"
+        }
+      }
+    },
+    "failure": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "required": [
+        "code",
+        "message",
+        "retryable"
+      ],
+      "properties": {
+        "code": {
+          "enum": [
+            "UNSUPPORTED_VERSION",
+            "INVALID_JOB",
+            "SOURCE_HOST_NOT_ALLOWED",
+            "DOWNLOAD_FAILED",
+            "INPUT_TOO_LARGE",
+            "UNSUPPORTED_INPUT",
+            "PROBE_FAILED",
+            "DURATION_TOO_LONG",
+            "ENCODE_FAILED",
+            "UPLOAD_FAILED",
+            "TIMEOUT",
+            "INTERNAL"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "stderr_tail": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  },
+  "description": "Keys with a null value may be omitted by the transport; treat a missing key as null. The failure block is named `failure`, not `error`: the RunPod SDK strips a top-level `error` key from handler output and turns it into a platform-level FAILED status."
+}

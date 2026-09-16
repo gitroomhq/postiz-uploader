@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+fixtures/generated/
+bench-results/
+*.egg-info/
+.DS_Store
+.idea/
