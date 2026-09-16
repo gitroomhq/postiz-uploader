@@ -40,25 +40,53 @@ USER worker
 CMD ["python", "handler.py"]
 
 # ---------------------------------------------------------------- gpu
-FROM ${FFMPEG_GPU_IMAGE} AS gpu
+# The prebuilt ffmpeg image drags in the whole CUDA runtime (cuBLAS, cuSPARSE, cuFFT,
+# NCCL, ...), 2.6 GB of which ffmpeg uses about 260 MB. Stage 1 collects ffmpeg,
+# ffprobe and every shared library they resolve; stage 2 drops them into the same
+# python:3.12-slim base the cpu image uses. Result: ~0.6 GB instead of 2.6 GB, and a
+# cold pull on RunPod of ~15 s instead of ~80 s.
+FROM ${FFMPEG_GPU_IMAGE} AS ffmpeg-gpu
+RUN set -eux; \
+    mkdir -p /slim/bin /slim/lib; \
+    cp /usr/local/bin/ffmpeg /usr/local/bin/ffprobe /slim/bin/; \
+    # every resolved dependency except what the target base already provides
+    # (glibc, libgcc, libstdc++, libgomp, openssl, zlib, expat)
+    ldd /usr/local/bin/ffmpeg /usr/local/bin/ffprobe \
+      | awk '/=> \//{print $3}' | sort -u \
+      | grep -Ev '/(ld-linux[^/]*|libc|libm|libdl|libpthread|librt|libmvec|libresolv|libgcc_s|libstdc\+\+|libgomp|libcrypto|libssl|libz|libexpat)\.so' \
+      | while read -r lib; do cp -L "$lib" /slim/lib/; done; \
+    ls /slim/lib | wc -l
+
+FROM python:3.12-slim AS gpu
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
     ENCODER=h264_nvenc WORKER_CONCURRENCY=8 WORK_DIR=/work \
-    NVIDIA_DRIVER_CAPABILITIES=compute,video,utility
-RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip ca-certificates \
-    && rm -rf /var/lib/apt/lists/* \
-    && ffmpeg -hide_banner -encoders | grep -q ' h264_nvenc ' \
-    && ffmpeg -hide_banner -filters | grep -q ' scale_npp ' \
-    && ffmpeg -hide_banner -filters | grep -q ' zscale ' \
-    && ffmpeg -hide_banner -filters | grep -q ' tonemap ' \
-    && (ffmpeg -hide_banner -filters | grep -q ' transpose_npp ' || echo "WARNING: transpose_npp missing, rotated clips will use software decode")
+    NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=compute,video,utility \
+    # same constraint the CUDA 12.3 base declares: the driver must speak CUDA 12.3, or be
+    # one of the LTS branches (470/525/535) that the compat package below covers
+    NVIDIA_REQUIRE_CUDA="cuda>=12.3 brand=tesla,driver>=470,driver<471 brand=unknown,driver>=470,driver<471 brand=nvidia,driver>=470,driver<471 brand=nvidiartx,driver>=470,driver<471 brand=geforce,driver>=470,driver<471 brand=geforcertx,driver>=470,driver<471 brand=quadro,driver>=470,driver<471 brand=quadrortx,driver>=470,driver<471 brand=titan,driver>=470,driver<471 brand=titanrtx,driver>=470,driver<471 brand=tesla,driver>=525,driver<526 brand=unknown,driver>=525,driver<526 brand=nvidia,driver>=525,driver<526 brand=nvidiartx,driver>=525,driver<526 brand=geforce,driver>=525,driver<526 brand=geforcertx,driver>=525,driver<526 brand=quadro,driver>=525,driver<526 brand=quadrortx,driver>=525,driver<526 brand=titan,driver>=525,driver<526 brand=titanrtx,driver>=525,driver<526 brand=tesla,driver>=535,driver<536 brand=unknown,driver>=535,driver<536 brand=nvidia,driver>=535,driver<536 brand=nvidiartx,driver>=535,driver<536 brand=geforce,driver>=535,driver<536 brand=geforcertx,driver>=535,driver<536 brand=quadro,driver>=535,driver<536 brand=quadrortx,driver>=535,driver<536 brand=titan,driver>=535,driver<536 brand=titanrtx,driver>=535,driver<536"
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libstdc++6 libgomp1 libexpat1 \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=ffmpeg-gpu /slim/bin/ /opt/ffmpeg/bin/
+COPY --from=ffmpeg-gpu /slim/lib/ /opt/ffmpeg/lib/
+# forward-compat driver libs: the nvidia container runtime mounts these over the host
+# driver when the host is on an older LTS branch (see NVIDIA_REQUIRE_CUDA above)
+COPY --from=ffmpeg-gpu /usr/local/cuda/compat/ /usr/local/cuda/compat/
+# zz- so the base's own libs win and /opt/ffmpeg/lib only fills the gaps
+RUN set -eux; \
+    echo /opt/ffmpeg/lib > /etc/ld.so.conf.d/zz-ffmpeg.conf; ldconfig; \
+    ln -s /opt/ffmpeg/bin/ffmpeg /opt/ffmpeg/bin/ffprobe /usr/local/bin/; \
+    if ldd /usr/local/bin/ffmpeg /usr/local/bin/ffprobe | grep 'not found'; then exit 1; fi; \
+    ffmpeg -hide_banner -encoders | grep -q ' h264_nvenc '; \
+    ffmpeg -hide_banner -filters | grep -q ' scale_npp '; \
+    ffmpeg -hide_banner -filters | grep -q ' zscale '; \
+    ffmpeg -hide_banner -filters | grep -q ' tonemap '; \
+    (ffmpeg -hide_banner -filters | grep -q ' transpose_npp ' || echo "WARNING: transpose_npp missing, rotated clips will use software decode")
+COPY --from=deps /install /usr/local
 WORKDIR /app
-COPY requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
 COPY postiz_uploader ./postiz_uploader
 COPY schema ./schema
 COPY handler.py .
 RUN useradd --create-home --uid 1000 worker && mkdir -p /work && chown worker:worker /work
 USER worker
-# the ffmpeg base image sets ffmpeg as the entrypoint
-ENTRYPOINT []
-CMD ["python3", "handler.py"]
+CMD ["python", "handler.py"]

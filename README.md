@@ -545,12 +545,17 @@ Two build targets from one Dockerfile, same Python code.
   architecture (amd64 and arm64, so it builds on Apple Silicon too) with libx264,
   libzimg for `zscale`, and `tonemap`. Used for local development, CI, the
   benchmark on a laptop, and as a CPU fallback fleet if ever needed.
-- `gpu`: `nvidia/cuda:<version>-runtime-ubuntu22.04` plus an ffmpeg built with
-  `--enable-cuda-nvcc --enable-libnpp --enable-nvenc --enable-nvdec` and the same
-  software libraries. Either a maintained prebuilt image such as the `jrottenberg/ffmpeg`
-  NVIDIA variants as the base, or a build stage from source pinned to a release tag.
-  The image must pass `ffmpeg -hide_banner -encoders | grep h264_nvenc` at build time
-  so a broken build fails in CI rather than on the first job.
+- `gpu`: the same `python:3.12-slim` base plus `ffmpeg`/`ffprobe` and the shared
+  libraries they resolve, copied out of `jrottenberg/ffmpeg:7.1-nvidia2204` (built with
+  `--enable-libnpp --enable-nvenc --enable-nvdec`). The prebuilt image is 2.6 GB because
+  it carries the whole CUDA runtime (cuBLAS, cuSPARSE, cuFFT, NCCL, ...); ffmpeg needs
+  about 260 MB of it, mostly the NPP image libraries behind `scale_npp`. Copying only
+  what `ldd` reports gives a 0.7 GB image (0.33 GB download), which cuts a fresh
+  RunPod cold pull from ~80 s to ~15 s. The CUDA compat package is kept so hosts on the
+  525/535 driver branches still work, and `NVIDIA_REQUIRE_CUDA` mirrors the base.
+  The build fails if `ldd` reports a missing library or if `h264_nvenc`, `scale_npp`,
+  `zscale` or `tonemap` are absent, so a broken build fails in CI rather than on the
+  first job.
 
 Both images:
 
