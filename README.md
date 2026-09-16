@@ -690,9 +690,16 @@ For orientation only. None of this lives in this repo and none of it is built ye
 2. **Done.** CPU pipeline end to end on the generated fixture set, integration tests,
    `docker compose` local loop, `scripts/run-local.py`, `scripts/bench.py`, the RunPod
    local API smoke-tested with `curl`.
-3. GPU image with NVENC: the Dockerfile target and the CUDA command path exist but
-   have **not yet run on a real GPU**. First numbers on an L4 and the concurrency
-   setting are pending.
-4. RunPod endpoint in Secure Cloud. The CI workflow publishes tagged images to GHCR;
-   the endpoint has not been created.
+3. **Partly done.** `0.1.1-gpu` ran on a real L4 (2026-09-16): a 720p H.264 clip
+   was upscaled to 1080p with `h264_nvenc` and passed the post-check. The CUDA
+   decode path (`-hwaccel cuda` + `scale_npp`) failed with ffmpeg error -38 and the
+   worker fell back to software decode as designed (`worker.decode: "software"`).
+   Getting NVDEC decode working and the benchmark-driven concurrency setting are
+   still open.
+4. **Done.** Endpoint `postiz-uploader` (id `otkdrlw2yudos9`) in Secure Cloud, pinned
+   to the L4 inside pool `AMPERE_24`, image `ghcr.io/gitroomhq/postiz-uploader:0.1.1-gpu`,
+   FlashBoot on, 50 GB disk, execution timeout 1500 s, min 0 / max 5 workers, idle
+   60 s. `ALLOWED_SOURCE_HOSTS` is a placeholder (`*.r2.cloudflarestorage.com`) until
+   the real bucket hosts are set. Min workers is 0 until the GPU path is validated
+   further; raise to 1 for a warm worker (about $0.69/h).
 5. Hand the schema files and endpoint details to the Postiz integration work.
