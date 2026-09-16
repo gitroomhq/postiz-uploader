@@ -124,7 +124,7 @@ def test_encode_command_gpu_shape():
     )
     joined = " ".join(cmd)
     assert "-hwaccel cuda -hwaccel_output_format cuda -noautorotate -display_rotation 0" in joined
-    assert "transpose_npp=dir=clock,scale_cuda=1080:1920:interp_algo=lanczos:format=yuv420p" in joined
+    assert "transpose_npp=dir=clock,scale_npp=1080:1920:interp_algo=lanczos:format=yuv420p" in joined
     assert "-c:v h264_nvenc" in joined and "-cq 23" in joined
     assert "-c:a copy" in joined
 

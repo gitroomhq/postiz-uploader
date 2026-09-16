@@ -47,7 +47,7 @@ ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
 RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && ffmpeg -hide_banner -encoders | grep -q ' h264_nvenc ' \
-    && ffmpeg -hide_banner -filters | grep -q ' scale_cuda ' \
+    && ffmpeg -hide_banner -filters | grep -q ' scale_npp ' \
     && ffmpeg -hide_banner -filters | grep -q ' zscale ' \
     && ffmpeg -hide_banner -filters | grep -q ' tonemap ' \
     && (ffmpeg -hide_banner -filters | grep -q ' transpose_npp ' || echo "WARNING: transpose_npp missing, rotated clips will use software decode")

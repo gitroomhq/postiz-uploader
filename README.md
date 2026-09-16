@@ -372,7 +372,7 @@ Encode, GPU flavour (`ENCODER=h264_nvenc`), decode and scale stay on the GPU:
 ```
 ffmpeg -hwaccel cuda -hwaccel_output_format cuda -i input
   -map 0:v:0 -map 0:a:0?
-  -vf "scale_cuda=W:H:interp_algo=lanczos,<fps>"       # frames never leave GPU memory
+  -vf "scale_npp=W:H:interp_algo=lanczos,<fps>"        # frames never leave GPU memory (scale_cuda needs an nvcc build the base image lacks)
   -c:v h264_nvenc -preset p4 -tune hq -rc vbr -cq <quality> -b:v 0 -profile:v high -pix_fmt yuv420p
   -c:a aac -b:a <audio_bitrate>k -ar <sample_rate>
   -movflags +faststart

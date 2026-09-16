@@ -164,7 +164,7 @@ def build_encode(
                 filters += _TRANSPOSE.get(info.rotation, [])
             if plan.fps_cap:
                 filters.append(f"fps=fps={plan.fps_cap:g}")
-            filters.append(f"scale_cuda={plan.width}:{plan.height}:interp_algo=lanczos:format={rules.pixel_format}")
+            filters.append(f"scale_npp={plan.width}:{plan.height}:interp_algo=lanczos:format={rules.pixel_format}")
         else:
             # autorotate applies the rotate tag before user filters, so the target
             # dimensions (already post-rotation) are correct here
