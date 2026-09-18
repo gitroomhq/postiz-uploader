@@ -1,0 +1,292 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/gitroomhq/postiz-uploader/schema/v1/ingest-result.schema.json",
+  "title": "IngestResult",
+  "description": "Keys with a null value may be omitted by the transport; treat a missing key as null. The failure block is named `failure`, not `error` (see result.schema.json). `source` is filled as soon as it is known, so a DURATION_TOO_LONG failure still reports the duration.",
+  "type": "object",
+  "required": [
+    "version",
+    "type",
+    "reference",
+    "status"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "type": {
+      "const": "ingest"
+    },
+    "reference": {
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "completed",
+        "failed"
+      ]
+    },
+    "source": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "via": {
+          "enum": [
+            "direct",
+            "ytdlp"
+          ]
+        },
+        "extractor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "uploader": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "webpage_url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "thumbnail_url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "language": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "duration_seconds": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "width": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "height": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "fps": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "video_codec": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "audio_codec": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bytes": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "proxied": {
+          "type": "boolean"
+        }
+      }
+    },
+    "video": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "width": {
+          "type": "integer"
+        },
+        "height": {
+          "type": "integer"
+        },
+        "duration_seconds": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "bytes": {
+          "type": "integer"
+        },
+        "content_type": {
+          "type": "string"
+        },
+        "video_codec": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "audio_codec": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fps": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      }
+    },
+    "audio": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "duration_seconds": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "bytes": {
+          "type": "integer"
+        },
+        "content_type": {
+          "type": "string"
+        },
+        "codec": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bitrate_kbps": {
+          "type": "integer"
+        },
+        "sample_rate": {
+          "type": "integer"
+        }
+      }
+    },
+    "timing_ms": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer"
+      }
+    },
+    "worker": {
+      "type": "object",
+      "properties": {
+        "encoder": {
+          "type": "string"
+        },
+        "decode": {
+          "enum": [
+            "cuda",
+            "software",
+            null
+          ]
+        },
+        "ffmpeg": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "gpu": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "version": {
+          "type": "string"
+        }
+      }
+    },
+    "failure": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "required": [
+        "code",
+        "message",
+        "retryable"
+      ],
+      "properties": {
+        "code": {
+          "enum": [
+            "UNSUPPORTED_VERSION",
+            "INVALID_JOB",
+            "SOURCE_HOST_NOT_ALLOWED",
+            "DOWNLOAD_FAILED",
+            "SOURCE_BLOCKED",
+            "SOURCE_UNAVAILABLE",
+            "INPUT_TOO_LARGE",
+            "UNSUPPORTED_INPUT",
+            "PROBE_FAILED",
+            "DURATION_TOO_LONG",
+            "ENCODE_FAILED",
+            "UPLOAD_FAILED",
+            "TIMEOUT",
+            "INTERNAL"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "stderr_tail": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  }
+}

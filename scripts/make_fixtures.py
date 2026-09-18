@@ -38,10 +38,11 @@ def _video(
     audio: bool = True,
     extra: list[str] | None = None,
     faststart: bool = True,
+    duration: str = DURATION,
 ) -> None:
-    inputs = ["-f", "lavfi", "-i", f"testsrc2=size={w}x{h}:rate={fps}:duration={DURATION}"]
+    inputs = ["-f", "lavfi", "-i", f"testsrc2=size={w}x{h}:rate={fps}:duration={duration}"]
     if audio:
-        inputs += ["-f", "lavfi", "-i", f"sine=frequency=440:sample_rate=48000:duration={DURATION}"]
+        inputs += ["-f", "lavfi", "-i", f"sine=frequency=440:sample_rate=48000:duration={duration}"]
     args = [*inputs, "-map", "0:v", *(["-map", "1:a"] if audio else []), *vcodec]
     if audio:
         args += ["-c:a", "aac", "-b:a", "96k", "-ar", "48000"]
@@ -78,6 +79,8 @@ def make(out_dir: str) -> dict[str, str]:
     _video(p("slowmo-120fps.mp4"), 1920, 1080, fps=120, vcodec=x264)
     _video(p("ultrawide-2560x1080.mp4"), 2560, 1080, vcodec=x264)
     _video(p("small-480p-h264.mp4"), 854, 480, vcodec=x264)
+    # long enough to cut several clips out of; testsrc2 burns a running timecode in
+    _video(p("talk-8s.mp4"), 1280, 720, vcodec=x264, duration="8")
     # display matrix like an iPhone portrait clip: 1920x1080 stored, shown as 1080x1920.
     # ffprobe reports it as rotation -90; the worker turns that into a clockwise 90.
     _ffmpeg(

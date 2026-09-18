@@ -3,3 +3,4 @@ requests==2.32.4
 Pillow==11.3.0
 jsonschema==4.25.1
 sentry-sdk==2.38.0
+yt-dlp[default]==2026.8.19

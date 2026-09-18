@@ -7,6 +7,12 @@ to a URL it was given, and reports what it did.
 It runs as a [RunPod Serverless](https://docs.runpod.io/serverless/overview) worker on
 an NVIDIA L4, and as a plain CPU container for local development and as a fallback.
 
+It also runs the two heavy steps of video clipping (sections 4.4 and 4.5): `ingest`
+fetches a long source once and produces a faststart MP4 plus a small audio track for
+speech-to-text, and `clip` cuts N segments out of a source, reframes them for vertical
+feeds and burns in word-timed captions. Transcription, choosing what to cut and
+scheduling the results are the caller's job.
+
 The service knows nothing about Postiz. There are no media ids, no database, no storage
 credentials and no callbacks into any API. URLs in, metadata out. This is a deliberate
 boundary and every section below assumes it.
@@ -86,9 +92,11 @@ postiz_uploader/
   probe.py                    ffprobe -> SourceInfo (rotation, HDR, faststart)
   planner.py                  pure: clamp_dimensions, plan_video
   ffmpeg.py                   command builders (libx264 / nvenc / tonemap) and the runner
-  video.py  image.py          the two media stages
+  video.py  image.py          the two normalization stages
+  ingest.py  ytdlp.py         ingest stage; yt-dlp as a subprocess
+  clip.py  captions.py        clip stage; word timings -> ASS subtitles (pure)
   devserver.py                GET/PUT file server used by tests, compose and scripts
-schema/v1/                    job.schema.json, result.schema.json (vendored by the caller)
+schema/v1/                    job + result schemas per job type (vendored by the caller)
 scripts/                      make_fixtures.py, run-local.py, bench.py
 tests/                        planner/schema/unit tests + end-to-end on generated fixtures
 ```
@@ -264,6 +272,8 @@ unhandled crash, which is a bug.
 | `INVALID_JOB` | no | schema validation failed; `message` names the field |
 | `SOURCE_HOST_NOT_ALLOWED` | no | `source.url` host not in the allowlist |
 | `DOWNLOAD_FAILED` | yes | network error or non-2xx while fetching the source |
+| `SOURCE_BLOCKED` | yes | ingest: the platform refused this worker (bot check, 403, 429) on every route |
+| `SOURCE_UNAVAILABLE` | no | ingest: the video is private, removed, age or region restricted |
 | `INPUT_TOO_LARGE` | no | declared or actual size over `limits.max_input_bytes` |
 | `UNSUPPORTED_INPUT` | no | not a video/image we can read, or type does not match `job.type` |
 | `PROBE_FAILED` | no | ffprobe could not parse the file |
@@ -272,6 +282,105 @@ unhandled crash, which is a bug.
 | `UPLOAD_FAILED` | yes | PUT to `output.url` or `thumbnail.url` failed |
 | `TIMEOUT` | yes | exceeded `limits.timeout_seconds`; ffmpeg was killed |
 | `INTERNAL` | yes | anything else; a bug |
+
+### 4.4 Ingest jobs (`type: "ingest"`)
+
+Schemas: `schema/v1/ingest.schema.json` and `ingest-result.schema.json`. Same
+`version`, same envelope, same error block as above.
+
+```jsonc
+{
+  "version": 1,
+  "type": "ingest",
+  "reference": "clip_project_42",
+  "source": {
+    "url": "https://www.youtube.com/watch?v=...",
+    "via": "ytdlp",              // "direct" (default): plain GET of a file, ALLOWED_SOURCE_HOSTS
+                                 // "ytdlp": a video page, ALLOWED_INGEST_HOSTS
+    "max_height": 1080,          // ytdlp only; never pull a taller rendition
+    "proxy": null                // ytdlp only; overrides INGEST_PROXY, never logged
+  },
+  "video": { "url": "<presigned PUT>" },                       // faststart MP4; optional
+  "audio": { "url": "<presigned PUT>", "bitrate_kbps": 24, "sample_rate": 16000 },  // mono Opus in Ogg; optional
+  "limits": { "max_input_bytes": 2147483648, "max_duration_seconds": 7200, "timeout_seconds": 1200 }
+}
+```
+
+At least one of `video` and `audio` is required. A caller whose source is already in
+its bucket sends `via: "direct"` with only `audio`.
+
+- **ytdlp route.** One metadata pass, then a download that reuses it
+  (`--load-info-json`), so the page is resolved once. Live and upcoming streams are
+  rejected. Duration and estimated size are checked **before** any media is fetched,
+  and again after for pages that do not declare them. Format choice is
+  `-S res:<max_height>,vcodec:h264,acodec:aac`: the stored source plays in a browser
+  and the merge is a remux.
+- **Proxy.** Datacenter addresses get bot-checked. With a proxy configured the worker
+  still tries its own address first and only retries through the proxy on
+  `SOURCE_BLOCKED`, because proxy bandwidth is the most expensive part of an ingest
+  (`INGEST_DIRECT_FIRST=false` sends everything through it). `source.proxied` in the
+  result says which route won.
+- **Audio.** 24 kbps mono Opus is about 11 MB per hour, small enough for any
+  speech-to-text API to fetch by URL.
+- The result's `source` block carries `title`, `description` (first 5000 chars),
+  `uploader`, `thumbnail_url`, `duration_seconds` and the probed stream facts. It is
+  filled as soon as it is known, so a `DURATION_TOO_LONG` failure still reports the
+  duration. A caller metering by the minute can set `max_duration_seconds` to the
+  customer's remaining balance and read the real length off the failure.
+
+### 4.5 Clip jobs (`type: "clip"`)
+
+Schemas: `schema/v1/clip.schema.json` and `clip-result.schema.json`.
+
+```jsonc
+{
+  "version": 1,
+  "type": "clip",
+  "reference": "clip_project_42",
+  "source": { "url": "<presigned GET of the ingested MP4>" },
+  "clips": [                                   // 1 to 50
+    {
+      "reference": "clip_1",                   // unique within the job, echoed back
+      "start_seconds": 312.4,
+      "end_seconds": 356.0,                    // clamped to the end of the source
+      "output": { "url": "<presigned PUT>" },  // video/mp4
+      "thumbnail": { "url": "<presigned PUT>", "timestamp_seconds": 0 },   // optional, clip-relative
+      "focus_x": 0.35                          // optional per-clip override of frame.focus_x
+    }
+  ],
+  "frame": { "width": 1080, "height": 1920, "fit": "crop", "focus_x": 0.5, "focus_y": 0.5 },
+  "captions": {                                // optional
+    "words": [ { "text": "Hello", "start": 312.6, "end": 312.9 } ],   // SOURCE timeline
+    "style": { "font": "Montserrat", "highlight_color": "#FFE600", "position": "bottom",
+               "max_words": 4, "max_chars": 18, "uppercase": false }
+  },
+  "video": { "quality": 23, "fps_max": 60, "audio_bitrate_kbps": 128 },
+  "limits": { "max_input_bytes": 2147483648, "max_clip_seconds": 600, "timeout_seconds": 1200 }
+}
+```
+
+- **One download, N cuts.** The source is fetched once. Each cut seeks on the input
+  (`-ss` before `-i`), which is frame accurate because the clip is always re-encoded.
+- **`frame.fit`.** `crop` fills the canvas and cuts the overflow around the focus
+  point (0 is left/top, 1 is right/bottom). `blur` fits the whole picture over a
+  blurred, quarter-resolution copy of itself. The focus point is an input so that a
+  caller with face tracking can steer the crop without this service knowing about it.
+- **Captions.** `words` is the whole transcript on the source timeline; the worker
+  slices it per clip, so the same array serves every clip. Words are grouped into
+  lines (at most `max_words` / `max_chars`, and always broken on a pause over 0.8 s or
+  sentence punctuation) and written as ASS with one event per word so the spoken word
+  carries `highlight_color`. `highlight_color: null` gives plain lines. Rendering is
+  libass, so right-to-left and non-Latin scripts work through fontconfig fallback
+  (Noto is installed; CJK is not). Braces and backslashes in the transcript are
+  neutralised so text can never inject ASS override tags.
+- **Partial success.** Each clip is uploaded as soon as it is rendered. The job status
+  is `completed` when every clip succeeded, `partial` when some did, `failed` when none
+  did (the top-level `failure` then repeats the first clip's). Per-clip `status` and
+  `failure` say which to resubmit. A job that runs out of time keeps the clips it
+  finished; the rest fail with a retryable `TIMEOUT`.
+- **Encoder.** Same fallback ladder as normalization (NVDEC + NVENC, software decode
+  + NVENC, libx264). Every filter here runs on the CPU, so CUDA only offloads the
+  decode and encode. A rung that fails is dropped for the remaining clips of the job.
 
 ---
 
@@ -529,11 +638,16 @@ All configuration is environment variables. There are no config files.
 | `MAX_INPUT_BYTES_CAP` | `2147483648` | Upper bound the service enforces even if a job asks for more. |
 | `IMAGE_MAX_PIXELS` | `100000000` | Images above this many pixels are rejected as `UNSUPPORTED_INPUT`. |
 | `FFMPEG_BIN` / `FFPROBE_BIN` | `ffmpeg` / `ffprobe` | Override binaries for local testing. |
+| `ALLOWED_INGEST_HOSTS` | `youtube.com,*.youtube.com,youtu.be` | Hosts a `via: ytdlp` source may point at. Separate from the list above on purpose: yt-dlp's generic extractor will fetch any URL it is given. |
+| `INGEST_PROXY` | empty | Proxy URL yt-dlp falls back to when blocked. A job's `source.proxy` overrides it. |
+| `INGEST_DIRECT_FIRST` | `true` | Try the worker's own address before the proxy. |
+| `FONTS_DIR` | empty | Extra directory of caption fonts for libass, on top of fontconfig. |
 | `SENTRY_DSN` | empty | Optional error reporting. |
 | `LOG_LEVEL` | `info` | |
 
 There are intentionally **no storage credentials** and no caller API keys. The only
-secret in the system is the RunPod endpoint key, which lives on the caller.
+secrets are the RunPod endpoint key, which lives on the caller, and the optional
+ingest proxy URL.
 
 ---
 
@@ -556,6 +670,13 @@ Two build targets from one Dockerfile, same Python code.
   The build fails if `ldd` reports a missing library or if `h264_nvenc`, `scale_npp`,
   `zscale` or `tonemap` are absent, so a broken build fails in CI rather than on the
   first job.
+
+Both images also carry what clipping needs: `yt-dlp` with a pinned Deno (it needs a
+JavaScript runtime for YouTube's player challenges), and fontconfig with Montserrat
+and Noto for captions. The build asserts the `ass` filter and `libopus` exist and runs
+`scripts/check-caption-font.sh`, which renders one subtitle and fails unless libass
+resolved Montserrat to the real font file (a broken fontconfig otherwise falls back
+silently).
 
 Both images:
 
@@ -657,6 +778,19 @@ Endpoint settings for production:
 | Env | `ENCODER=h264_nvenc`, `WORKER_CONCURRENCY=8`, `ALLOWED_SOURCE_HOSTS=<bucket hosts>` | |
 | Region | closest to the R2 bucket's location hint | Download and upload are the only latency that matters. |
 
+**Two endpoints, one image.** Clipping runs on its own endpoint (`postiz-clipper`) with
+the same image tag. A clip job downloads up to 2 GB and renders for minutes; on a
+shared queue five of them would hold every worker while a person waits on a web
+upload. The split also keeps the settings honest:
+
+| setting | normalization | clipping |
+|---|---|---|
+| `WORKER_CONCURRENCY` | 8 | 2 (each job runs a full-frame CPU filter chain) |
+| `ALLOWED_SOURCE_HOSTS` | bucket hosts | bucket hosts |
+| `ALLOWED_INGEST_HOSTS` | unused | default (YouTube) |
+| `INGEST_PROXY` | unset | the proxy, only here |
+| Container disk | 50 GB | 50 GB |
+
 Release flow: GitHub Actions builds both images on a tag, pushes to GHCR, runs the
 integration suite on the CPU image, and the endpoint's image tag is updated by hand (or
 by the RunPod API in a later iteration). Never point production at a tag that has not
@@ -721,3 +855,6 @@ For orientation only. None of this lives in this repo and none of it is built ye
    the real bucket hosts are set. Min workers is 0 until the GPU path is validated
    further; raise to 1 for a warm worker (about $0.69/h).
 5. Hand the schema files and endpoint details to the Postiz integration work.
+6. **Done (0.2.0).** `ingest` and `clip` job types, their schemas, yt-dlp + Deno and
+   caption fonts in both images, tests on generated fixtures including the yt-dlp
+   route through its generic extractor.

@@ -1,0 +1,346 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/gitroomhq/postiz-uploader/schema/v1/clip.schema.json",
+  "title": "ClipJob",
+  "description": "Download one source, cut N segments out of it, reframe each to a fixed canvas, optionally burn word-timed captions, and PUT every clip to its own presigned URL.",
+  "type": "object",
+  "required": [
+    "version",
+    "type",
+    "reference",
+    "source",
+    "clips"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "type": {
+      "const": "clip"
+    },
+    "reference": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "source": {
+      "type": "object",
+      "required": [
+        "url"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https?://"
+        }
+      }
+    },
+    "clips": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "required": [
+          "reference",
+          "start_seconds",
+          "end_seconds",
+          "output"
+        ],
+        "properties": {
+          "reference": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "start_seconds": {
+            "type": "number",
+            "minimum": 0
+          },
+          "end_seconds": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "output": {
+            "type": "object",
+            "required": [
+              "url"
+            ],
+            "properties": {
+              "url": {
+                "type": "string",
+                "format": "uri",
+                "pattern": "^https?://"
+              },
+              "content_type": {
+                "const": "video/mp4",
+                "default": "video/mp4"
+              }
+            }
+          },
+          "thumbnail": {
+            "required": [
+              "url"
+            ],
+            "properties": {
+              "url": {
+                "type": "string",
+                "format": "uri",
+                "pattern": "^https?://"
+              },
+              "timestamp_seconds": {
+                "type": "number",
+                "minimum": 0,
+                "default": 0,
+                "description": "Relative to the start of the clip."
+              },
+              "content_type": {
+                "const": "image/jpeg",
+                "default": "image/jpeg"
+              }
+            },
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "focus_x": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Overrides frame.focus_x for this clip."
+          },
+          "focus_y": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        }
+      }
+    },
+    "frame": {
+      "type": "object",
+      "properties": {
+        "width": {
+          "type": "integer",
+          "minimum": 16,
+          "maximum": 4096,
+          "multipleOf": 2,
+          "default": 1080
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 16,
+          "maximum": 4096,
+          "multipleOf": 2,
+          "default": 1920
+        },
+        "fit": {
+          "enum": [
+            "crop",
+            "blur"
+          ],
+          "default": "crop",
+          "description": "crop: fill the canvas and cut the overflow around the focus point. blur: fit the whole picture over a blurred copy of itself."
+        },
+        "focus_x": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.5
+        },
+        "focus_y": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.5
+        }
+      }
+    },
+    "captions": {
+      "required": [
+        "words"
+      ],
+      "properties": {
+        "words": {
+          "type": "array",
+          "maxItems": 100000,
+          "description": "The transcript with times on the SOURCE timeline. The worker slices it per clip, so the same array serves every clip.",
+          "items": {
+            "type": "object",
+            "required": [
+              "text",
+              "start",
+              "end"
+            ],
+            "properties": {
+              "text": {
+                "type": "string",
+                "maxLength": 200
+              },
+              "start": {
+                "type": "number",
+                "minimum": 0
+              },
+              "end": {
+                "type": "number",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "style": {
+          "type": "object",
+          "properties": {
+            "font": {
+              "type": "string",
+              "maxLength": 100,
+              "pattern": "^[^,{}\\\\\\n]+$",
+              "default": "Montserrat"
+            },
+            "bold": {
+              "type": "boolean",
+              "default": true
+            },
+            "font_size": {
+              "type": "integer",
+              "minimum": 8,
+              "maximum": 400,
+              "description": "Pixels on the output canvas. Default: 1/24 of the canvas height."
+            },
+            "color": {
+              "type": "string",
+              "pattern": "^#[0-9a-fA-F]{6}$",
+              "default": "#FFFFFF"
+            },
+            "highlight_color": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "pattern": "^#[0-9a-fA-F]{6}$",
+              "default": "#FFE600",
+              "description": "Colour of the word being spoken; null disables the per-word highlight."
+            },
+            "outline_color": {
+              "type": "string",
+              "pattern": "^#[0-9a-fA-F]{6}$",
+              "default": "#000000"
+            },
+            "outline": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 20,
+              "default": 4
+            },
+            "shadow": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 20,
+              "default": 0
+            },
+            "position": {
+              "enum": [
+                "top",
+                "middle",
+                "bottom"
+              ],
+              "default": "bottom"
+            },
+            "margin_v": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Pixels from the top or bottom edge. Default: 1/5 of the canvas height."
+            },
+            "max_words": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20,
+              "default": 4
+            },
+            "max_chars": {
+              "type": "integer",
+              "minimum": 4,
+              "maximum": 200,
+              "default": 18
+            },
+            "uppercase": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        }
+      },
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "video": {
+      "type": "object",
+      "properties": {
+        "profile": {
+          "enum": [
+            "baseline",
+            "main",
+            "high"
+          ],
+          "default": "high"
+        },
+        "fps_max": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0,
+          "default": 60
+        },
+        "quality": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 51,
+          "default": 23
+        },
+        "audio_bitrate_kbps": {
+          "type": "integer",
+          "minimum": 32,
+          "maximum": 512,
+          "default": 128
+        },
+        "audio_sample_rate": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "enum": [
+            44100,
+            48000,
+            null
+          ],
+          "default": 48000
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "properties": {
+        "max_input_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 2147483648
+        },
+        "max_clip_seconds": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 600
+        },
+        "timeout_seconds": {
+          "type": "number",
+          "minimum": 10,
+          "default": 1200
+        }
+      }
+    }
+  }
+}

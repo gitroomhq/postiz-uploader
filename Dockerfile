@@ -6,6 +6,10 @@
 
 ARG FFMPEG_STATIC_VERSION=7.0.2
 ARG FFMPEG_GPU_IMAGE=jrottenberg/ffmpeg:7.1-nvidia2204
+# yt-dlp needs a JavaScript runtime to solve YouTube's player challenges
+ARG DENO_IMAGE=denoland/deno:bin-2.5.0
+
+FROM ${DENO_IMAGE} AS deno
 
 # ---------------------------------------------------------------- shared python deps
 FROM python:3.12-slim AS deps
@@ -19,8 +23,17 @@ ARG FFMPEG_STATIC_VERSION
 ARG TARGETARCH
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
     ENCODER=libx264 WORKER_CONCURRENCY=1 WORK_DIR=/work
+# fonts: Montserrat is the default caption face, Noto covers non-Latin scripts through
+# fontconfig fallback (CJK is not included, it would add ~100 MB)
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl xz-utils \
-    && rm -rf /var/lib/apt/lists/*
+      fontconfig fonts-montserrat fonts-noto-core \
+    && rm -rf /var/lib/apt/lists/* \
+    # keep the four basic Montserrat faces only: the other weights also register under the
+    # family name "Montserrat", and libass versions disagree on which one "bold" means
+    && find /usr/share/fonts -ipath '*montserrat*' -type f \
+         ! -name 'Montserrat-Regular.otf' ! -name 'Montserrat-Bold.otf' \
+         ! -name 'Montserrat-Italic.otf' ! -name 'Montserrat-BoldItalic.otf' -delete \
+    && fc-cache -f
 RUN set -eux; \
     case "$TARGETARCH" in amd64|arm64) arch="$TARGETARCH" ;; *) echo "unsupported arch $TARGETARCH" >&2; exit 1 ;; esac; \
     curl -fsSL "https://johnvansickle.com/ffmpeg/releases/ffmpeg-${FFMPEG_STATIC_VERSION}-${arch}-static.tar.xz" -o /tmp/ffmpeg.tar.xz; \
@@ -29,8 +42,14 @@ RUN set -eux; \
     rm -rf /tmp/ffmpeg /tmp/ffmpeg.tar.xz; \
     ffmpeg -hide_banner -encoders | grep -q ' libx264 '; \
     ffmpeg -hide_banner -filters | grep -q ' zscale '; \
-    ffmpeg -hide_banner -filters | grep -q ' tonemap '
+    ffmpeg -hide_banner -filters | grep -q ' tonemap '; \
+    ffmpeg -hide_banner -filters | grep -q ' ass '; \
+    ffmpeg -hide_banner -encoders | grep -q ' libopus '
+COPY scripts/check-caption-font.sh /usr/local/bin/
+RUN check-caption-font.sh
+COPY --from=deno /deno /usr/local/bin/deno
 COPY --from=deps /install /usr/local
+RUN deno --version && python -m yt_dlp --version
 WORKDIR /app
 COPY postiz_uploader ./postiz_uploader
 COPY schema ./schema
@@ -66,7 +85,14 @@ ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
     # one of the LTS branches (470/525/535) that the compat package below covers
     NVIDIA_REQUIRE_CUDA="cuda>=12.3 brand=tesla,driver>=470,driver<471 brand=unknown,driver>=470,driver<471 brand=nvidia,driver>=470,driver<471 brand=nvidiartx,driver>=470,driver<471 brand=geforce,driver>=470,driver<471 brand=geforcertx,driver>=470,driver<471 brand=quadro,driver>=470,driver<471 brand=quadrortx,driver>=470,driver<471 brand=titan,driver>=470,driver<471 brand=titanrtx,driver>=470,driver<471 brand=tesla,driver>=525,driver<526 brand=unknown,driver>=525,driver<526 brand=nvidia,driver>=525,driver<526 brand=nvidiartx,driver>=525,driver<526 brand=geforce,driver>=525,driver<526 brand=geforcertx,driver>=525,driver<526 brand=quadro,driver>=525,driver<526 brand=quadrortx,driver>=525,driver<526 brand=titan,driver>=525,driver<526 brand=titanrtx,driver>=525,driver<526 brand=tesla,driver>=535,driver<536 brand=unknown,driver>=535,driver<536 brand=nvidia,driver>=535,driver<536 brand=nvidiartx,driver>=535,driver<536 brand=geforce,driver>=535,driver<536 brand=geforcertx,driver>=535,driver<536 brand=quadro,driver>=535,driver<536 brand=quadrortx,driver>=535,driver<536 brand=titan,driver>=535,driver<536 brand=titanrtx,driver>=535,driver<536"
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libstdc++6 libgomp1 libexpat1 \
-    && rm -rf /var/lib/apt/lists/*
+      fontconfig fonts-montserrat fonts-noto-core \
+    && rm -rf /var/lib/apt/lists/* \
+    # keep the four basic Montserrat faces only: the other weights also register under the
+    # family name "Montserrat", and libass versions disagree on which one "bold" means
+    && find /usr/share/fonts -ipath '*montserrat*' -type f \
+         ! -name 'Montserrat-Regular.otf' ! -name 'Montserrat-Bold.otf' \
+         ! -name 'Montserrat-Italic.otf' ! -name 'Montserrat-BoldItalic.otf' -delete \
+    && fc-cache -f
 COPY --from=ffmpeg-gpu /slim/bin/ /opt/ffmpeg/bin/
 COPY --from=ffmpeg-gpu /slim/lib/ /opt/ffmpeg/lib/
 # forward-compat driver libs: the nvidia container runtime mounts these over the host
@@ -81,8 +107,14 @@ RUN set -eux; \
     ffmpeg -hide_banner -filters | grep -q ' scale_npp '; \
     ffmpeg -hide_banner -filters | grep -q ' zscale '; \
     ffmpeg -hide_banner -filters | grep -q ' tonemap '; \
+    ffmpeg -hide_banner -filters | grep -q ' ass '; \
+    ffmpeg -hide_banner -encoders | grep -q ' libopus '; \
     (ffmpeg -hide_banner -filters | grep -q ' transpose_npp ' || echo "WARNING: transpose_npp missing, rotated clips will use software decode")
+COPY scripts/check-caption-font.sh /usr/local/bin/
+RUN check-caption-font.sh
+COPY --from=deno /deno /usr/local/bin/deno
 COPY --from=deps /install /usr/local
+RUN deno --version && python -m yt_dlp --version
 WORKDIR /app
 COPY postiz_uploader ./postiz_uploader
 COPY schema ./schema

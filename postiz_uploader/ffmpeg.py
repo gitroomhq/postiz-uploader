@@ -14,7 +14,7 @@ from postiz_uploader import errors
 from postiz_uploader.errors import JobError
 from postiz_uploader.planner import Plan
 from postiz_uploader.probe import SourceInfo
-from postiz_uploader.schema import VideoRules
+from postiz_uploader.schema import Frame, VideoRules
 
 STDERR_TAIL = 4096
 BASE_ARGS = ["-y", "-nostdin", "-hide_banner", "-loglevel", "error"]
@@ -116,6 +116,38 @@ def _audio_args(plan: Plan, info: SourceInfo, rules: VideoRules) -> list[str]:
     return args
 
 
+def _encoder_args(encoder: str, rules: VideoRules) -> list[str]:
+    if encoder == "h264_nvenc":
+        return [
+            "-c:v",
+            "h264_nvenc",
+            "-preset",
+            "p4",
+            "-tune",
+            "hq",
+            "-rc",
+            "vbr",
+            "-cq",
+            str(rules.quality),
+            "-b:v",
+            "0",
+            "-profile:v",
+            rules.profile,
+        ]
+    return [
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        str(rules.quality),
+        "-profile:v",
+        rules.profile,
+        "-pix_fmt",
+        rules.pixel_format,
+    ]
+
+
 def build_remux(ffmpeg_bin: str, src: str, dst: str, info: SourceInfo, rules: VideoRules) -> list[str]:
     cmd = [ffmpeg_bin, *BASE_ARGS, "-i", src, "-map", "0:V:0"]
     if info.has_audio:
@@ -180,36 +212,7 @@ def build_encode(
                 filters.append(f"format={rules.pixel_format}")
         cmd += ["-vf", ",".join(filters)]
 
-        if encoder == "h264_nvenc":
-            cmd += [
-                "-c:v",
-                "h264_nvenc",
-                "-preset",
-                "p4",
-                "-tune",
-                "hq",
-                "-rc",
-                "vbr",
-                "-cq",
-                str(rules.quality),
-                "-b:v",
-                "0",
-                "-profile:v",
-                rules.profile,
-            ]
-        else:
-            cmd += [
-                "-c:v",
-                "libx264",
-                "-preset",
-                "veryfast",
-                "-crf",
-                str(rules.quality),
-                "-profile:v",
-                rules.profile,
-                "-pix_fmt",
-                rules.pixel_format,
-            ]
+        cmd += _encoder_args(encoder, rules)
     else:
         cmd += ["-c:v", "copy"]
 
@@ -238,3 +241,125 @@ def build_thumbnail(ffmpeg_bin: str, src: str, dst: str, *, timestamp: float, wi
         "image2",
         dst,
     ]
+
+
+def build_audio_extract(ffmpeg_bin: str, src: str, dst: str, *, bitrate_kbps: int, sample_rate: int) -> list[str]:
+    """Mono Opus in Ogg, sized for speech-to-text rather than listening."""
+    return [
+        ffmpeg_bin,
+        *BASE_ARGS,
+        "-i",
+        src,
+        "-vn",
+        "-map",
+        "0:a:0",
+        "-ac",
+        "1",
+        "-ar",
+        str(sample_rate),
+        "-c:a",
+        "libopus",
+        "-application",
+        "voip",
+        "-b:a",
+        f"{bitrate_kbps}k",
+        "-f",
+        "ogg",
+        dst,
+    ]
+
+
+def filter_path(path: str) -> str:
+    """Quote a filesystem path for use as a filter option value.
+
+    The value is parsed twice: the graph parser strips the quotes, then the option
+    parser splits on `:` and unescapes backslashes. So inside the quotes every special
+    character still carries the backslash the second pass needs.
+    """
+    return "'" + path.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'\\''") + "'"
+
+
+def clip_filter(
+    frame: Frame,
+    *,
+    focus_x: float,
+    focus_y: float,
+    fps_cap: float | None,
+    tonemap: bool,
+    pixel_format: str,
+    ass_path: str | None,
+    fonts_dir: str | None,
+) -> str:
+    """The simple filtergraph that turns any source picture into the clip canvas."""
+    w, h = frame.width, frame.height
+    head: list[str] = []
+    if fps_cap:
+        head.append(f"fps=fps={fps_cap:g}")
+    if tonemap:
+        head.append(TONEMAP_CPU)
+
+    if frame.fit == "blur":
+        # the background is blurred at quarter size: cheaper, and softer once scaled back up
+        bw, bh = max(w // 8 * 2, 2), max(h // 8 * 2, 2)
+        pre = ",".join(head) + "," if head else ""
+        graph = (
+            f"{pre}split=2[bg][fg];"
+            f"[bg]scale={bw}:{bh}:force_original_aspect_ratio=increase,crop={bw}:{bh},boxblur=8:2,"
+            f"scale={w}:{h}:flags=bilinear[bgb];"
+            f"[fg]scale={w}:{h}:force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos[fgs];"
+            f"[bgb][fgs]overlay=(W-w)/2:(H-h)/2"
+        )
+    else:
+        graph = ",".join(
+            [
+                *head,
+                f"scale={w}:{h}:force_original_aspect_ratio=increase:flags=lanczos",
+                f"crop={w}:{h}:(iw-ow)*{focus_x:.4f}:(ih-oh)*{focus_y:.4f}",
+            ]
+        )
+
+    tail = ["setsar=1"]
+    if ass_path:
+        ass = f"ass=filename={filter_path(ass_path)}"
+        if fonts_dir:
+            ass += f":fontsdir={filter_path(fonts_dir)}"
+        tail.append(ass)
+    tail.append(f"format={pixel_format}")
+    return graph + "," + ",".join(tail)
+
+
+def build_clip(
+    ffmpeg_bin: str,
+    src: str,
+    dst: str,
+    *,
+    start: float,
+    duration: float,
+    vf: str,
+    has_audio: bool,
+    rules: VideoRules,
+    encoder: str,
+    cuda_decode: bool,
+) -> list[str]:
+    """Cut [start, start + duration) and re-encode it through `vf`.
+
+    The seek is an input option, so it is frame accurate (ffmpeg decodes from the
+    previous keyframe and drops frames up to `start`) and output timestamps begin at
+    zero, which is what the caption file is timed against. Every filter in `vf` runs
+    on the CPU, so cuda_decode only offloads the decode; frames come back to system
+    memory.
+    """
+    cmd = [ffmpeg_bin, *BASE_ARGS]
+    if cuda_decode:
+        cmd += ["-hwaccel", "cuda"]
+    cmd += ["-ss", f"{start:.3f}", "-t", f"{duration:.3f}", "-i", src, "-map", "0:V:0", "-vf", vf]
+    cmd += _encoder_args(encoder, rules)
+    if has_audio:
+        cmd += ["-map", "0:a:0", "-c:a", rules.audio_codec, "-b:a", f"{rules.audio_bitrate_kbps}k"]
+        if rules.audio_sample_rate:
+            cmd += ["-ar", str(rules.audio_sample_rate)]
+        cmd += ["-ac", "2"]
+    else:
+        cmd += ["-an"]
+    cmd += ["-movflags", "+faststart", "-f", rules.container, dst]
+    return cmd

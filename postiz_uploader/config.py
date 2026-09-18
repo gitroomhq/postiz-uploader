@@ -16,6 +16,12 @@ class Settings:
     ffprobe_bin: str = "ffprobe"
     sentry_dsn: str = ""
     log_level: str = "info"
+    # ingest: hosts a `via: ytdlp` source may point at, and the proxy yt-dlp falls back to
+    allowed_ingest_hosts: tuple[str, ...] = field(default_factory=tuple)
+    ingest_proxy: str = ""
+    ingest_direct_first: bool = True
+    # clip: where libass looks for caption fonts
+    fonts_dir: str = ""
 
     @property
     def gpu(self) -> bool:
@@ -32,6 +38,20 @@ def _int(name: str, default: int) -> int:
         raise RuntimeError(f"{name} must be an integer, got {raw!r}") from err
 
 
+DEFAULT_INGEST_HOSTS = "youtube.com,*.youtube.com,youtu.be"
+
+
+def _hosts(name: str, default: str) -> tuple[str, ...]:
+    return tuple(h.strip().lower() for h in os.environ.get(name, default).split(",") if h.strip())
+
+
+def _bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
 def get_settings() -> Settings:
     """Read configuration from the environment on every call.
 
@@ -41,7 +61,7 @@ def get_settings() -> Settings:
     if encoder not in ("libx264", "h264_nvenc"):
         raise RuntimeError(f"ENCODER must be libx264 or h264_nvenc, got {encoder!r}")
 
-    hosts = tuple(h.strip().lower() for h in os.environ.get("ALLOWED_SOURCE_HOSTS", "").split(",") if h.strip())
+    hosts = _hosts("ALLOWED_SOURCE_HOSTS", "")
 
     return Settings(
         encoder=encoder,
@@ -54,4 +74,8 @@ def get_settings() -> Settings:
         ffprobe_bin=os.environ.get("FFPROBE_BIN", "ffprobe"),
         sentry_dsn=os.environ.get("SENTRY_DSN", ""),
         log_level=os.environ.get("LOG_LEVEL", "info"),
+        allowed_ingest_hosts=_hosts("ALLOWED_INGEST_HOSTS", DEFAULT_INGEST_HOSTS),
+        ingest_proxy=os.environ.get("INGEST_PROXY", "").strip(),
+        ingest_direct_first=_bool("INGEST_DIRECT_FIRST", True),
+        fonts_dir=os.environ.get("FONTS_DIR", "").strip(),
     )

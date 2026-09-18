@@ -30,11 +30,14 @@ class JobError(Exception):
         }
 
 
-# Codes, mirrored in README section 4.3 and schema/v1/result.schema.json
+# Codes, mirrored in README section 4.3 and the result schemas under schema/v1
 UNSUPPORTED_VERSION = "UNSUPPORTED_VERSION"
 INVALID_JOB = "INVALID_JOB"
 SOURCE_HOST_NOT_ALLOWED = "SOURCE_HOST_NOT_ALLOWED"
 DOWNLOAD_FAILED = "DOWNLOAD_FAILED"
+# ingest only: the platform refused this worker (bot check, 429) vs the video itself is gone
+SOURCE_BLOCKED = "SOURCE_BLOCKED"
+SOURCE_UNAVAILABLE = "SOURCE_UNAVAILABLE"
 INPUT_TOO_LARGE = "INPUT_TOO_LARGE"
 UNSUPPORTED_INPUT = "UNSUPPORTED_INPUT"
 PROBE_FAILED = "PROBE_FAILED"

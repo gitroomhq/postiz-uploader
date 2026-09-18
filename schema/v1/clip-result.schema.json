@@ -1,0 +1,336 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/gitroomhq/postiz-uploader/schema/v1/clip-result.schema.json",
+  "title": "ClipResult",
+  "description": "Keys with a null value may be omitted by the transport; treat a missing key as null. The failure block is named `failure`, not `error` (see result.schema.json). Every clip is uploaded as soon as it is rendered, so a `partial` or timed-out job keeps the clips it finished; resubmit only the failed ones.",
+  "type": "object",
+  "required": [
+    "version",
+    "type",
+    "reference",
+    "status",
+    "clips"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "type": {
+      "const": "clip"
+    },
+    "reference": {
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "completed",
+        "partial",
+        "failed"
+      ]
+    },
+    "source": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "container": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "video_codec": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pixel_format": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "color_transfer": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "color_primaries": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "width": {
+          "type": "integer"
+        },
+        "height": {
+          "type": "integer"
+        },
+        "rotation": {
+          "type": "integer"
+        },
+        "fps": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "duration_seconds": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "bytes": {
+          "type": "integer"
+        },
+        "audio_codec": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "audio_sample_rate": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "faststart": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "format": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "animated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "clips": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "reference",
+          "status"
+        ],
+        "properties": {
+          "reference": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "completed",
+              "failed"
+            ]
+          },
+          "start_seconds": {
+            "type": "number"
+          },
+          "end_seconds": {
+            "type": "number"
+          },
+          "output": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "width": {
+                "type": "integer"
+              },
+              "height": {
+                "type": "integer"
+              },
+              "duration_seconds": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "bytes": {
+                "type": "integer"
+              },
+              "content_type": {
+                "type": "string"
+              },
+              "video_codec": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "audio_codec": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "fps": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            }
+          },
+          "thumbnail": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "width": {
+                "type": "integer"
+              },
+              "height": {
+                "type": "integer"
+              },
+              "bytes": {
+                "type": "integer"
+              }
+            }
+          },
+          "caption_lines": {
+            "type": "integer",
+            "description": "Caption groups burned in; 0 when none fell inside the clip."
+          },
+          "failure": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "required": [
+              "code",
+              "message",
+              "retryable"
+            ],
+            "properties": {
+              "code": {
+                "enum": [
+                  "UNSUPPORTED_VERSION",
+                  "INVALID_JOB",
+                  "SOURCE_HOST_NOT_ALLOWED",
+                  "DOWNLOAD_FAILED",
+                  "SOURCE_BLOCKED",
+                  "SOURCE_UNAVAILABLE",
+                  "INPUT_TOO_LARGE",
+                  "UNSUPPORTED_INPUT",
+                  "PROBE_FAILED",
+                  "DURATION_TOO_LONG",
+                  "ENCODE_FAILED",
+                  "UPLOAD_FAILED",
+                  "TIMEOUT",
+                  "INTERNAL"
+                ]
+              },
+              "message": {
+                "type": "string"
+              },
+              "retryable": {
+                "type": "boolean"
+              },
+              "stderr_tail": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "timing_ms": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer"
+      }
+    },
+    "worker": {
+      "type": "object",
+      "properties": {
+        "encoder": {
+          "type": "string"
+        },
+        "decode": {
+          "enum": [
+            "cuda",
+            "software",
+            null
+          ]
+        },
+        "ffmpeg": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "gpu": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "version": {
+          "type": "string"
+        }
+      }
+    },
+    "failure": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "required": [
+        "code",
+        "message",
+        "retryable"
+      ],
+      "properties": {
+        "code": {
+          "enum": [
+            "UNSUPPORTED_VERSION",
+            "INVALID_JOB",
+            "SOURCE_HOST_NOT_ALLOWED",
+            "DOWNLOAD_FAILED",
+            "SOURCE_BLOCKED",
+            "SOURCE_UNAVAILABLE",
+            "INPUT_TOO_LARGE",
+            "UNSUPPORTED_INPUT",
+            "PROBE_FAILED",
+            "DURATION_TOO_LONG",
+            "ENCODE_FAILED",
+            "UPLOAD_FAILED",
+            "TIMEOUT",
+            "INTERNAL"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "stderr_tail": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "description": "Job-level failure, or a copy of the first clip failure when every clip failed."
+    }
+  }
+}

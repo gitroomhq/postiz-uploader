@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/gitroomhq/postiz-uploader/schema/v1/ingest.schema.json",
+  "title": "IngestJob",
+  "description": "Fetch a long source video once and write a faststart MP4 and/or a small speech-grade audio track to presigned URLs.",
+  "type": "object",
+  "required": [
+    "version",
+    "type",
+    "reference",
+    "source"
+  ],
+  "anyOf": [
+    {
+      "required": [
+        "video"
+      ],
+      "properties": {
+        "video": {
+          "type": "object"
+        }
+      }
+    },
+    {
+      "required": [
+        "audio"
+      ],
+      "properties": {
+        "audio": {
+          "type": "object"
+        }
+      }
+    }
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "type": {
+      "const": "ingest"
+    },
+    "reference": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "source": {
+      "type": "object",
+      "required": [
+        "url"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https?://"
+        },
+        "via": {
+          "enum": [
+            "direct",
+            "ytdlp"
+          ],
+          "default": "direct",
+          "description": "direct: plain GET, host checked against ALLOWED_SOURCE_HOSTS. ytdlp: a video page, host checked against ALLOWED_INGEST_HOSTS."
+        },
+        "max_height": {
+          "type": "integer",
+          "minimum": 144,
+          "maximum": 4320,
+          "default": 1080,
+          "description": "ytdlp only: never pull a rendition taller than this."
+        },
+        "proxy": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^(https?|socks5h?)://",
+          "description": "ytdlp only: overrides the worker's INGEST_PROXY. Never logged."
+        }
+      }
+    },
+    "video": {
+      "required": [
+        "url"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https?://"
+        },
+        "content_type": {
+          "const": "video/mp4",
+          "default": "video/mp4"
+        }
+      },
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "audio": {
+      "required": [
+        "url"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https?://"
+        },
+        "content_type": {
+          "const": "audio/ogg",
+          "default": "audio/ogg"
+        },
+        "bitrate_kbps": {
+          "type": "integer",
+          "minimum": 8,
+          "maximum": 128,
+          "default": 24
+        },
+        "sample_rate": {
+          "enum": [
+            16000,
+            24000,
+            48000
+          ],
+          "default": 16000
+        }
+      },
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "limits": {
+      "type": "object",
+      "properties": {
+        "max_input_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 2147483648
+        },
+        "max_duration_seconds": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 7200
+        },
+        "timeout_seconds": {
+          "type": "number",
+          "minimum": 10,
+          "default": 1200
+        }
+      }
+    }
+  }
+}
