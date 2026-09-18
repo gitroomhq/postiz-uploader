@@ -318,8 +318,12 @@ its bucket sends `via: "direct"` with only `audio`.
 - **Proxy.** Datacenter addresses get bot-checked. With a proxy configured the worker
   still tries its own address first and only retries through the proxy on
   `SOURCE_BLOCKED`, because proxy bandwidth is the most expensive part of an ingest
-  (`INGEST_DIRECT_FIRST=false` sends everything through it). `source.proxied` in the
-  result says which route won.
+  (`INGEST_DIRECT_FIRST=false` sends everything through it). `INGEST_PROXY` is a pool:
+  each job samples `INGEST_PROXY_ATTEMPTS` addresses at random and moves to the next
+  one on `SOURCE_BLOCKED`. The worker keeps no state between jobs, so random choice is
+  what spreads load and keeps one flagged address from failing every job.
+  `source.proxied` in the result says which kind of route won; proxy credentials never
+  reach logs or results.
 - **Audio.** 24 kbps mono Opus is about 11 MB per hour, small enough for any
   speech-to-text API to fetch by URL.
 - The result's `source` block carries `title`, `description` (first 5000 chars),
@@ -639,7 +643,8 @@ All configuration is environment variables. There are no config files.
 | `IMAGE_MAX_PIXELS` | `100000000` | Images above this many pixels are rejected as `UNSUPPORTED_INPUT`. |
 | `FFMPEG_BIN` / `FFPROBE_BIN` | `ffmpeg` / `ffprobe` | Override binaries for local testing. |
 | `ALLOWED_INGEST_HOSTS` | `youtube.com,*.youtube.com,youtu.be` | Hosts a `via: ytdlp` source may point at. Separate from the list above on purpose: yt-dlp's generic extractor will fetch any URL it is given. |
-| `INGEST_PROXY` | empty | Proxy URL yt-dlp falls back to when blocked. A job's `source.proxy` overrides it. |
+| `INGEST_PROXY` | empty | Proxy pool yt-dlp falls back to when blocked: URLs (`http://`, `socks5://`) or `host:port:user:pass` entries, separated by commas or whitespace. A job's `source.proxy` replaces the pool. |
+| `INGEST_PROXY_ATTEMPTS` | `2` | How many different proxies from the pool one job may try. |
 | `INGEST_DIRECT_FIRST` | `true` | Try the worker's own address before the proxy. |
 | `FONTS_DIR` | empty | Extra directory of caption fonts for libass, on top of fontconfig. |
 | `SENTRY_DSN` | empty | Optional error reporting. |

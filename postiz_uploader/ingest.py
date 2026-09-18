@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import random
 import time
+from urllib.parse import urlsplit
 
 from postiz_uploader import errors, ffmpeg, ytdlp
 from postiz_uploader.config import Settings
@@ -30,15 +32,35 @@ def _check_duration(duration: float | None, job: IngestJob) -> None:
         )
 
 
+def _routes(job: IngestJob, settings: Settings) -> list[str | None]:
+    """The order yt-dlp tries: this worker's own address, then proxies. None is direct.
+
+    The pool is sampled, not walked in order: the worker keeps no state between jobs,
+    so random choice is what spreads load across the addresses and keeps one flagged
+    proxy from failing every job. A job's own proxy replaces the pool.
+    """
+    if job.source.proxy:
+        proxies = [job.source.proxy]
+    else:
+        pool = list(settings.ingest_proxies)
+        proxies = random.sample(pool, min(settings.ingest_proxy_attempts, len(pool)))
+    # bandwidth through a proxy is the expensive part of an ingest, so it is only
+    # used once the platform has refused this worker's own address
+    direct: list[str | None] = [None] if settings.ingest_direct_first or not proxies else []
+    return direct + proxies
+
+
+def _route_name(route: str | None) -> str:
+    """Host of a route for logs; never the credentials."""
+    return (urlsplit(route).hostname or "proxy") if route else "direct"
+
+
 def _fetch_ytdlp(job: IngestJob, workdir: str, settings: Settings, deadline: float, max_bytes: int, partial: dict):
     if not host_allowed(job.source.url, settings.allowed_ingest_hosts):
         raise JobError(
             errors.SOURCE_HOST_NOT_ALLOWED, f"host of source.url is not allowed: {redact_url(job.source.url)}"
         )
-    proxy = job.source.proxy or settings.ingest_proxy or None
-    # bandwidth through a proxy is the expensive part of an ingest, so it is only
-    # used once the platform has refused this worker's own address
-    routes: list[str | None] = [None, proxy] if proxy and settings.ingest_direct_first else [proxy]
+    routes = _routes(job, settings)
 
     for i, route in enumerate(routes):
         try:
@@ -80,7 +102,13 @@ def _fetch_ytdlp(job: IngestJob, workdir: str, settings: Settings, deadline: flo
         except JobError as err:
             if err.code != errors.SOURCE_BLOCKED or i + 1 == len(routes):
                 raise
-            log(logger, "blocked on the direct route, retrying through the proxy", reference=job.reference)
+            log(
+                logger,
+                "blocked, trying the next route",
+                reference=job.reference,
+                blocked=_route_name(route),
+                next=_route_name(routes[i + 1]),
+            )
     raise AssertionError("unreachable")
 
 

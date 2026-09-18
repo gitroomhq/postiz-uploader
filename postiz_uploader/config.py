@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 
 
@@ -18,7 +19,8 @@ class Settings:
     log_level: str = "info"
     # ingest: hosts a `via: ytdlp` source may point at, and the proxy yt-dlp falls back to
     allowed_ingest_hosts: tuple[str, ...] = field(default_factory=tuple)
-    ingest_proxy: str = ""
+    ingest_proxies: tuple[str, ...] = field(default_factory=tuple)
+    ingest_proxy_attempts: int = 2
     ingest_direct_first: bool = True
     # clip: where libass looks for caption fonts
     fonts_dir: str = ""
@@ -43,6 +45,30 @@ DEFAULT_INGEST_HOSTS = "youtube.com,*.youtube.com,youtu.be"
 
 def _hosts(name: str, default: str) -> tuple[str, ...]:
     return tuple(h.strip().lower() for h in os.environ.get(name, default).split(",") if h.strip())
+
+
+def parse_proxies(raw: str) -> tuple[str, ...]:
+    """A proxy pool from one variable: URLs separated by commas or whitespace.
+
+    Providers hand out lists as `host:port:user:pass` lines, so that shape is accepted
+    too and read as an HTTP proxy.
+    """
+    proxies = []
+    for item in re.split(r"[,\s]+", raw.strip()):
+        if not item:
+            continue
+        if "://" not in item:
+            parts = item.split(":")
+            if len(parts) == 4:
+                host, port, user, password = parts
+                item = f"http://{user}:{password}@{host}:{port}"
+            elif len(parts) == 2:
+                item = f"http://{item}"
+            else:
+                raise RuntimeError("INGEST_PROXY entries must be URLs, host:port or host:port:user:pass")
+        if item not in proxies:
+            proxies.append(item)
+    return tuple(proxies)
 
 
 def _bool(name: str, default: bool) -> bool:
@@ -75,7 +101,8 @@ def get_settings() -> Settings:
         sentry_dsn=os.environ.get("SENTRY_DSN", ""),
         log_level=os.environ.get("LOG_LEVEL", "info"),
         allowed_ingest_hosts=_hosts("ALLOWED_INGEST_HOSTS", DEFAULT_INGEST_HOSTS),
-        ingest_proxy=os.environ.get("INGEST_PROXY", "").strip(),
+        ingest_proxies=parse_proxies(os.environ.get("INGEST_PROXY", "")),
+        ingest_proxy_attempts=max(_int("INGEST_PROXY_ATTEMPTS", 2), 1),
         ingest_direct_first=_bool("INGEST_DIRECT_FIRST", True),
         fonts_dir=os.environ.get("FONTS_DIR", "").strip(),
     )

@@ -131,3 +131,70 @@ def test_an_ingest_job_needs_at_least_one_output(bucket):
 )
 def test_ytdlp_failures_are_classified(stderr, code, retryable):
     assert classify(stderr) == (code, retryable)
+
+
+def test_proxy_pool_accepts_urls_and_provider_lists():
+    from postiz_uploader.config import parse_proxies
+
+    raw = "http://u:p@1.1.1.1:80, socks5://2.2.2.2:1080\n3.3.3.3:12323:user:pass\n4.4.4.4:8080 http://u:p@1.1.1.1:80"
+    assert parse_proxies(raw) == (
+        "http://u:p@1.1.1.1:80",
+        "socks5://2.2.2.2:1080",
+        "http://user:pass@3.3.3.3:12323",
+        "http://4.4.4.4:8080",
+    )
+    assert parse_proxies("  ") == ()
+    with pytest.raises(RuntimeError):
+        parse_proxies("a:b:c")
+
+
+def _ingest_job(bucket, **source):
+    from postiz_uploader.schema import parse_job
+
+    job = _job(bucket, "x.mp4", via="ytdlp")
+    job["source"].update(source)
+    return parse_job(job)
+
+
+def test_routes_go_direct_first_then_sample_the_pool(bucket, monkeypatch):
+    from postiz_uploader.ingest import _routes
+
+    pool = ",".join(f"http://10.0.0.{i}:80" for i in range(1, 9))
+    monkeypatch.setenv("INGEST_PROXY", pool)
+    seen = set()
+    for _ in range(50):
+        routes = _routes(_ingest_job(bucket), get_settings())
+        assert routes[0] is None and len(routes) == 3 and len(set(routes)) == 3
+        seen.update(routes[1:])
+    assert len(seen) > 2  # sampled, not always the head of the list
+
+    monkeypatch.setenv("INGEST_DIRECT_FIRST", "false")
+    monkeypatch.setenv("INGEST_PROXY_ATTEMPTS", "5")
+    assert None not in _routes(_ingest_job(bucket), get_settings())
+    assert len(_routes(_ingest_job(bucket), get_settings())) == 5
+
+    # a job's own proxy replaces the pool
+    assert _routes(_ingest_job(bucket, proxy="http://9.9.9.9:1"), get_settings()) == ["http://9.9.9.9:1"]
+
+    monkeypatch.delenv("INGEST_PROXY")
+    assert _routes(_ingest_job(bucket), get_settings()) == [None]
+
+
+def test_a_blocked_route_falls_through_to_the_next_and_credentials_stay_out_of_the_result(bucket, monkeypatch):
+    from postiz_uploader import ytdlp
+    from postiz_uploader.errors import JobError
+
+    monkeypatch.setenv("ALLOWED_INGEST_HOSTS", "127.0.0.1")
+    monkeypatch.setenv("INGEST_PROXY", "http://user:secret@10.0.0.1:80,http://user:secret@10.0.0.2:80")
+    tried = []
+
+    def blocked(url, workdir, *, proxy, **kw):
+        tried.append(proxy)
+        raise JobError(errors.SOURCE_BLOCKED, "Sign in to confirm you're not a bot", retryable=True)
+
+    monkeypatch.setattr(ytdlp, "fetch_metadata", blocked)
+    result = process(_job(bucket, "x.mp4", via="ytdlp"))
+    validate_result(result)
+    assert tried[0] is None and len(tried) == 3 and len(set(tried)) == 3
+    assert result["failure"]["code"] == errors.SOURCE_BLOCKED and result["failure"]["retryable"] is True
+    assert "secret" not in str(result)
