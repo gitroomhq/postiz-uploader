@@ -30,6 +30,16 @@
           "type": "object"
         }
       }
+    },
+    {
+      "required": [
+        "transcript"
+      ],
+      "properties": {
+        "transcript": {
+          "type": "object"
+        }
+      }
     }
   ],
   "properties": {
@@ -58,17 +68,18 @@
         "via": {
           "enum": [
             "direct",
-            "ytdlp"
+            "ytdlp",
+            "oxylabs"
           ],
           "default": "direct",
-          "description": "direct: plain GET, host checked against ALLOWED_SOURCE_HOSTS. ytdlp: a video page, host checked against ALLOWED_INGEST_HOSTS."
+          "description": "direct: plain GET, host checked against ALLOWED_SOURCE_HOSTS. ytdlp: a video page fetched by this worker, host checked against ALLOWED_INGEST_HOSTS. oxylabs: a YouTube URL fetched by Oxylabs into the worker's bucket; the worker never contacts YouTube."
         },
         "max_height": {
           "type": "integer",
           "minimum": 144,
           "maximum": 4320,
           "default": 1080,
-          "description": "ytdlp only: never pull a rendition taller than this."
+          "description": "ytdlp and oxylabs: never pull a rendition taller than this. oxylabs is further capped by OXYLABS_MAX_HEIGHT (720)."
         },
         "proxy": {
           "type": [
@@ -77,6 +88,22 @@
           ],
           "pattern": "^(https?|socks5h?)://",
           "description": "ytdlp only: overrides the worker's INGEST_PROXY. Never logged."
+        },
+        "start_seconds": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "oxylabs only: download this window instead of the whole video. Widened to whole seconds; the result's source.trim says what was fetched."
+        },
+        "end_seconds": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0,
+          "description": "oxylabs only: required with start_seconds."
         }
       }
     },
@@ -127,12 +154,52 @@
             48000
           ],
           "default": 16000
+        },
+        "unless_transcript": {
+          "type": "boolean",
+          "default": false,
+          "description": "Skip the audio, and the download behind it, when the transcript output found captions."
         }
       },
       "type": [
         "object",
         "null"
       ]
+    },
+    "transcript": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "required": [
+        "url"
+      ],
+      "description": "oxylabs only: YouTube's own captions as JSON {version, language, origin, word_level, segments[{start,end,text}], words[{text,start,end}]}. words is filled only for tracks that time every word (auto-generated).",
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https?://"
+        },
+        "content_type": {
+          "const": "application/json",
+          "default": "application/json"
+        },
+        "languages": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 12
+          },
+          "minItems": 1,
+          "maxItems": 4,
+          "default": [
+            "en"
+          ],
+          "description": "Tried in order; the first language with captions wins. Each miss costs one request."
+        }
+      }
     },
     "limits": {
       "type": "object",

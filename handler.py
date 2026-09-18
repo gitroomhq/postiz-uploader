@@ -10,6 +10,7 @@ import asyncio
 
 import runpod
 
+from postiz_uploader import pot
 from postiz_uploader.config import get_settings
 from postiz_uploader.log import setup_logging
 from postiz_uploader.pipeline import process
@@ -37,4 +38,6 @@ def _init_sentry() -> None:
 if __name__ == "__main__":
     setup_logging()
     _init_sentry()
+    # warm it while the worker waits for its first job; ingest waits for it if needed
+    pot.ensure(get_settings(), wait=False)
     runpod.serverless.start({"handler": handler, "concurrency_modifier": concurrency_modifier})

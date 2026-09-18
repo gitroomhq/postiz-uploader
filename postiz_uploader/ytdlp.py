@@ -85,9 +85,10 @@ def _base(proxy: str | None, max_height: int, ffmpeg_bin: str) -> list[str]:
         "--retries",
         "3",
         # closest rendition at or under max_height first, then prefer H.264/AAC so the
-        # stored source plays in a browser and the merge below is a plain remux
+        # stored source plays in a browser and the merge below is a plain remux. Stereo,
+        # because some clients also list a 5.1 AAC track that yt-dlp would rank higher.
         "-S",
-        f"res:{max_height},vcodec:h264,acodec:aac",
+        f"res:{max_height},vcodec:h264,acodec:aac,channels:2",
         "--merge-output-format",
         "mp4",
     ]
@@ -110,11 +111,26 @@ def _size(fmt: dict) -> int | None:
     return int(value) if isinstance(value, (int, float)) and value > 0 else None
 
 
+# yt-dlp's logged-out default (visionos) takes no PO token. mweb does, and with one it
+# lists the same https formats, so a player client YouTube breaks is not an outage.
+POT_PLAYER_CLIENTS = "default,mweb"
+
+
 def fetch_metadata(
-    url: str, workdir: str, *, proxy: str | None, max_height: int, ffmpeg_bin: str, deadline: float
+    url: str,
+    workdir: str,
+    *,
+    proxy: str | None,
+    max_height: int,
+    ffmpeg_bin: str,
+    deadline: float,
+    player_clients: str | None = None,
 ) -> Metadata:
     """Resolve the page without downloading media. Writes <workdir>/meta.info.json."""
-    cmd = _base(proxy, max_height, ffmpeg_bin) + [
+    cmd = _base(proxy, max_height, ffmpeg_bin)
+    if player_clients:
+        cmd += ["--extractor-args", f"youtube:player_client={player_clients}"]
+    cmd += [
         "--skip-download",
         "--write-info-json",
         "--no-write-comments",

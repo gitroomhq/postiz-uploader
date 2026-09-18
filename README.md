@@ -94,6 +94,8 @@ postiz_uploader/
   ffmpeg.py                   command builders (libx264 / nvenc / tonemap) and the runner
   video.py  image.py          the two normalization stages
   ingest.py  ytdlp.py         ingest stage; yt-dlp as a subprocess
+  pot.py                      the PO token server yt-dlp's bgutil plugin asks
+  oxylabs.py                  ingest via Oxylabs: metadata, captions, downloads into a bucket
   clip.py  captions.py        clip stage; word timings -> ASS subtitles (pure)
   devserver.py                GET/PUT file server used by tests, compose and scripts
 schema/v1/                    job + result schemas per job type (vendored by the caller)
@@ -296,18 +298,23 @@ Schemas: `schema/v1/ingest.schema.json` and `ingest-result.schema.json`. Same
   "source": {
     "url": "https://www.youtube.com/watch?v=...",
     "via": "ytdlp",              // "direct" (default): plain GET of a file, ALLOWED_SOURCE_HOSTS
-                                 // "ytdlp": a video page, ALLOWED_INGEST_HOSTS
-    "max_height": 1080,          // ytdlp only; never pull a taller rendition
-    "proxy": null                // ytdlp only; overrides INGEST_PROXY, never logged
+                                 // "ytdlp": a video page fetched by this worker, ALLOWED_INGEST_HOSTS
+                                 // "oxylabs": a YouTube URL fetched by Oxylabs, ALLOWED_INGEST_HOSTS
+    "max_height": 1080,          // ytdlp and oxylabs; never pull a taller rendition
+    "proxy": null,               // ytdlp only; overrides INGEST_PROXY, never logged
+    "start_seconds": null,       // oxylabs only; fetch this window instead of the whole video
+    "end_seconds": null
   },
   "video": { "url": "<presigned PUT>" },                       // faststart MP4; optional
-  "audio": { "url": "<presigned PUT>", "bitrate_kbps": 24, "sample_rate": 16000 },  // mono Opus in Ogg; optional
+  "audio": { "url": "<presigned PUT>", "bitrate_kbps": 24, "sample_rate": 16000,   // mono Opus in Ogg; optional
+             "unless_transcript": false },                     // skip it when captions were found
+  "transcript": { "url": "<presigned PUT>", "languages": ["en"] },  // oxylabs only; YouTube's captions as JSON
   "limits": { "max_input_bytes": 2147483648, "max_duration_seconds": 7200, "timeout_seconds": 1200 }
 }
 ```
 
-At least one of `video` and `audio` is required. A caller whose source is already in
-its bucket sends `via: "direct"` with only `audio`.
+At least one of `video`, `audio` and `transcript` is required. A caller whose source is
+already in its bucket sends `via: "direct"` with only `audio`.
 
 - **ytdlp route.** One metadata pass, then a download that reuses it
   (`--load-info-json`), so the page is resolved once. Live and upcoming streams are
@@ -324,6 +331,46 @@ its bucket sends `via: "direct"` with only `audio`.
   what spreads load and keeps one flagged address from failing every job.
   `source.proxied` in the result says which kind of route won; proxy credentials never
   reach logs or results.
+- **PO tokens.** The images carry the bgutil PO token server (its Deno flavor, on the
+  runtime yt-dlp already needs) and the worker runs it on `127.0.0.1:4416`: started at
+  boot, checked and restarted before every yt-dlp ingest. yt-dlp's logged-out default
+  client (`visionos`) takes no token, so while the server is up the worker asks for
+  `player_client=default,mweb`; `mweb` with a token lists the same https formats, which
+  makes a player client YouTube breaks a non-event. It costs about three more requests
+  per ingest. A token does **not** unblock an address YouTube has already flagged
+  (tested 2026-09-18 on a flagged ISP range), it only makes a clean one look more
+  legitimate. All of it is best effort: no server, no `mweb`, the job still runs.
+- **oxylabs route.** Oxylabs talks to YouTube and this worker never does: no player
+  clients, no bot checks, no proxies. It is billed per GB of media, so the route is
+  built to move as few bytes as possible, in this order:
+  1. `youtube_metadata` (title, duration): limits are enforced before anything is paid
+     for.
+  2. With a `transcript` output, `youtube_subtitles` for each language in order,
+     auto-generated before uploaded. The file is
+     `{version, language, origin, word_level, segments[{start,end,text}], words[{text,start,end}]}`.
+     Auto-generated tracks time every word, so `words` can feed a clip job's captions
+     as is. Uploaded tracks time lines only: `word_level` is `false` and `words` is
+     empty, never interpolated.
+  3. A download only if something still needs media. `audio.unless_transcript: true`
+     drops the audio when captions were found, and with only `audio` and `transcript`
+     asked for that means **no download at all**. Audio alone is fetched as audio
+     (about 1 MB per minute); video is capped at `OXYLABS_MAX_HEIGHT` (720) whatever
+     the job's `max_height` says.
+  4. `start_seconds`/`end_seconds` fetch one window (whole seconds, widened outwards;
+     cuts were frame-accurate in testing). `source.trim` in the result says what was
+     fetched, and every time in the outputs, transcript included, is relative to
+     `trim.start_seconds`. `source.duration_seconds` stays the whole video's.
+
+  The intended clipping flow is two kinds of job: one `transcript` +
+  `audio.unless_transcript` job for the whole video, then one `video` job per chosen
+  clip with a window padded by a couple of seconds, each feeding a `clip` job.
+
+  Oxylabs delivers into an S3-compatible bucket, not to presigned URLs, so this route
+  is the one place the worker holds a storage key: `OXYLABS_STORAGE_URL`. Give it a
+  **dedicated bucket and a token scoped to that bucket** (R2 tokens cannot be scoped to
+  a folder, and Oxylabs receives the key too), and a lifecycle rule that expires
+  objects after a day; the worker deletes what it fetched, best effort. Rejected
+  Oxylabs credentials fail the job as not retryable.
 - **Audio.** 24 kbps mono Opus is about 11 MB per hour, small enough for any
   speech-to-text API to fetch by URL.
 - The result's `source` block carries `title`, `description` (first 5000 chars),
@@ -646,6 +693,11 @@ All configuration is environment variables. There are no config files.
 | `INGEST_PROXY` | empty | Proxy pool yt-dlp falls back to when blocked: URLs (`http://`, `socks5://`) or `host:port:user:pass` entries, separated by commas or whitespace. A job's `source.proxy` replaces the pool. |
 | `INGEST_PROXY_ATTEMPTS` | `2` | How many different proxies from the pool one job may try. |
 | `INGEST_DIRECT_FIRST` | `true` | Try the worker's own address before the proxy. |
+| `OXYLABS_USERNAME` / `OXYLABS_PASSWORD` | empty | Oxylabs Web Scraper API login. Without them `via: oxylabs` jobs fail with `INVALID_JOB`. |
+| `OXYLABS_STORAGE_URL` | empty | `https://KEY:SECRET@host/bucket/folder` of the S3-compatible bucket Oxylabs delivers into and the worker reads back from. A folder is required. Use a dedicated bucket and a bucket-scoped key. |
+| `OXYLABS_STORAGE_REGION` | `auto` | SigV4 region for that bucket (`auto` is right for R2). |
+| `OXYLABS_MAX_HEIGHT` | `720` | Tallest rendition an oxylabs job may download, whatever it asks for. |
+| `POT_SERVER_DIR` | `/opt/bgutil` in the images, empty elsewhere | Where the bgutil PO token server lives. Empty runs yt-dlp without PO tokens. |
 | `FONTS_DIR` | empty | Extra directory of caption fonts for libass, on top of fontconfig. |
 | `SENTRY_DSN` | empty | Optional error reporting. |
 | `LOG_LEVEL` | `info` | |

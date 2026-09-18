@@ -35,7 +35,8 @@
         "via": {
           "enum": [
             "direct",
-            "ytdlp"
+            "ytdlp",
+            "oxylabs"
           ]
         },
         "extractor": {
@@ -130,6 +131,21 @@
         },
         "proxied": {
           "type": "boolean"
+        },
+        "trim": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "oxylabs with a window: the whole seconds actually fetched. Times in the outputs are relative to trim.start_seconds.",
+          "properties": {
+            "start_seconds": {
+              "type": "integer"
+            },
+            "end_seconds": {
+              "type": "integer"
+            }
+          }
         }
       }
     },
@@ -206,6 +222,39 @@
         },
         "sample_rate": {
           "type": "integer"
+        }
+      }
+    },
+    "transcript": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "null when no transcript was asked for or YouTube has no captions in the requested languages.",
+      "properties": {
+        "language": {
+          "type": "string"
+        },
+        "origin": {
+          "enum": [
+            "auto_generated",
+            "uploader_provided"
+          ]
+        },
+        "word_level": {
+          "type": "boolean"
+        },
+        "segments": {
+          "type": "integer"
+        },
+        "words": {
+          "type": "integer"
+        },
+        "bytes": {
+          "type": "integer"
+        },
+        "content_type": {
+          "type": "string"
         }
       }
     },

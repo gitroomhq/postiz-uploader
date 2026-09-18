@@ -76,7 +76,7 @@ def _capture(exc: BaseException) -> None:
 
 # what a result of each staged type looks like before the stage fills it in
 _STAGED_BLANK = {
-    "ingest": {"source": None, "video": None, "audio": None},
+    "ingest": {"source": None, "video": None, "audio": None, "transcript": None},
     "clip": {"source": None, "clips": []},
 }
 

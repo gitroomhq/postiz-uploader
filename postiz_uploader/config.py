@@ -22,6 +22,15 @@ class Settings:
     ingest_proxies: tuple[str, ...] = field(default_factory=tuple)
     ingest_proxy_attempts: int = 2
     ingest_direct_first: bool = True
+    # ingest: where the bgutil PO token server lives; empty means run without one
+    pot_server_dir: str = ""
+    # ingest via oxylabs: their login, the bucket they deliver into (with its key), and
+    # the tallest rendition a job may ask for, since downloads are billed per GB
+    oxylabs_username: str = ""
+    oxylabs_password: str = ""
+    oxylabs_storage_url: str = ""
+    oxylabs_storage_region: str = "auto"
+    oxylabs_max_height: int = 720
     # clip: where libass looks for caption fonts
     fonts_dir: str = ""
 
@@ -104,5 +113,11 @@ def get_settings() -> Settings:
         ingest_proxies=parse_proxies(os.environ.get("INGEST_PROXY", "")),
         ingest_proxy_attempts=max(_int("INGEST_PROXY_ATTEMPTS", 2), 1),
         ingest_direct_first=_bool("INGEST_DIRECT_FIRST", True),
+        pot_server_dir=os.environ.get("POT_SERVER_DIR", "").strip(),
+        oxylabs_username=os.environ.get("OXYLABS_USERNAME", "").strip(),
+        oxylabs_password=os.environ.get("OXYLABS_PASSWORD", ""),
+        oxylabs_storage_url=os.environ.get("OXYLABS_STORAGE_URL", "").strip(),
+        oxylabs_storage_region=os.environ.get("OXYLABS_STORAGE_REGION", "auto").strip() or "auto",
+        oxylabs_max_height=_int("OXYLABS_MAX_HEIGHT", 720),
         fonts_dir=os.environ.get("FONTS_DIR", "").strip(),
     )

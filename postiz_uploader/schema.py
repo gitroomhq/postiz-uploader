@@ -103,6 +103,9 @@ class IngestSource:
     via: str = "direct"
     max_height: int = 1080
     proxy: str | None = None
+    # oxylabs only: fetch this window instead of the whole video
+    start_seconds: float | None = None
+    end_seconds: float | None = None
 
 
 @dataclass(frozen=True)
@@ -111,6 +114,15 @@ class AudioOutput:
     content_type: str = "audio/ogg"
     bitrate_kbps: int = 24
     sample_rate: int = 16000
+    # skip the audio (and its download) when the transcript output found captions
+    unless_transcript: bool = False
+
+
+@dataclass(frozen=True)
+class TranscriptOutput:
+    url: str
+    content_type: str = "application/json"
+    languages: tuple[str, ...] = ("en",)
 
 
 @dataclass(frozen=True)
@@ -128,6 +140,7 @@ class IngestJob:
     source: IngestSource
     video: Output | None
     audio: AudioOutput | None
+    transcript: TranscriptOutput | None
     limits: IngestLimits
 
 
@@ -231,8 +244,15 @@ def _thumbnail(thumb_raw: dict | None) -> Thumbnail | None:
 def _parse_ingest(raw: dict) -> IngestJob:
     video_raw = raw.get("video")
     audio_raw = raw.get("audio")
-    if not video_raw and not audio_raw:
-        raise JobError(errors.INVALID_JOB, "an ingest job needs a video output, an audio output, or both")
+    transcript_raw = raw.get("transcript")
+    if not video_raw and not audio_raw and not transcript_raw:
+        raise JobError(errors.INVALID_JOB, "an ingest job needs a video, audio or transcript output")
+    via = raw["source"].get("via") or "direct"
+    if via != "oxylabs":
+        if transcript_raw:
+            raise JobError(errors.INVALID_JOB, "a transcript output needs source.via oxylabs")
+        if raw["source"].get("start_seconds") is not None or raw["source"].get("end_seconds") is not None:
+            raise JobError(errors.INVALID_JOB, "source.start_seconds and end_seconds need source.via oxylabs")
     return IngestJob(
         version=raw["version"],
         type="ingest",
@@ -242,6 +262,9 @@ def _parse_ingest(raw: dict) -> IngestJob:
         if video_raw
         else None,
         audio=_pick(audio_raw, AudioOutput) if audio_raw else None,
+        transcript=_pick(transcript_raw, TranscriptOutput, languages=tuple(transcript_raw.get("languages") or ("en",)))
+        if transcript_raw
+        else None,
         limits=_pick(raw.get("limits") or {}, IngestLimits),
     )
 

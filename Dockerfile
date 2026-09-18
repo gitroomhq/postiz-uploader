@@ -7,9 +7,13 @@
 ARG FFMPEG_STATIC_VERSION=7.0.2
 ARG FFMPEG_GPU_IMAGE=jrottenberg/ffmpeg:7.1-nvidia2204
 # yt-dlp needs a JavaScript runtime to solve YouTube's player challenges
-ARG DENO_IMAGE=denoland/deno:bin-2.5.0
+ARG DENO_IMAGE=denoland/deno:bin-2.9.5
+# PO token server for yt-dlp; its -deno flavor runs on the runtime above, so no Node.
+# Keep the tag equal to bgutil-ytdlp-pot-provider in requirements.txt.
+ARG BGUTIL_IMAGE=brainicism/bgutil-ytdlp-pot-provider:2.0.0-deno
 
 FROM ${DENO_IMAGE} AS deno
+FROM ${BGUTIL_IMAGE} AS bgutil
 
 # ---------------------------------------------------------------- shared python deps
 FROM python:3.12-slim AS deps
@@ -49,6 +53,9 @@ COPY scripts/check-caption-font.sh /usr/local/bin/
 RUN check-caption-font.sh
 COPY --from=deno /deno /usr/local/bin/deno
 COPY --from=deps /install /usr/local
+# owned by the worker user (created below): Deno writes its compile cache next to the code
+COPY --from=bgutil --chown=1000:1000 /app /opt/bgutil
+ENV POT_SERVER_DIR=/opt/bgutil
 RUN deno --version && python -m yt_dlp --version
 WORKDIR /app
 COPY postiz_uploader ./postiz_uploader
@@ -114,6 +121,9 @@ COPY scripts/check-caption-font.sh /usr/local/bin/
 RUN check-caption-font.sh
 COPY --from=deno /deno /usr/local/bin/deno
 COPY --from=deps /install /usr/local
+# owned by the worker user (created below): Deno writes its compile cache next to the code
+COPY --from=bgutil --chown=1000:1000 /app /opt/bgutil
+ENV POT_SERVER_DIR=/opt/bgutil
 RUN deno --version && python -m yt_dlp --version
 WORKDIR /app
 COPY postiz_uploader ./postiz_uploader

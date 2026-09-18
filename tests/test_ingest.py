@@ -198,3 +198,51 @@ def test_a_blocked_route_falls_through_to_the_next_and_credentials_stay_out_of_t
     assert tried[0] is None and len(tried) == 3 and len(set(tried)) == 3
     assert result["failure"]["code"] == errors.SOURCE_BLOCKED and result["failure"]["retryable"] is True
     assert "secret" not in str(result)
+
+
+def test_without_a_pot_server_nothing_starts_and_the_default_player_clients_are_kept(bucket, monkeypatch):
+    from postiz_uploader import pot, ytdlp
+    from postiz_uploader.errors import JobError
+
+    monkeypatch.setenv("ALLOWED_INGEST_HOSTS", "127.0.0.1")
+    monkeypatch.delenv("POT_SERVER_DIR", raising=False)
+    monkeypatch.setattr(pot, "_spawn", lambda settings: pytest.fail("no POT_SERVER_DIR, nothing to start"))
+    seen = []
+
+    def blocked(url, workdir, *, player_clients, **kw):
+        seen.append(player_clients)
+        raise JobError(errors.SOURCE_BLOCKED, "Sign in to confirm you're not a bot", retryable=True)
+
+    monkeypatch.setattr(ytdlp, "fetch_metadata", blocked)
+    process(_job(bucket, "x.mp4", via="ytdlp"))
+    assert seen == [None]
+
+
+def test_a_running_pot_server_adds_the_player_client_that_uses_its_tokens(bucket, monkeypatch):
+    from postiz_uploader import pot, ytdlp
+    from postiz_uploader.errors import JobError
+
+    monkeypatch.setenv("ALLOWED_INGEST_HOSTS", "127.0.0.1")
+    monkeypatch.setattr(pot, "ensure", lambda settings, **kw: True)
+    seen = []
+
+    def blocked(url, workdir, *, player_clients, **kw):
+        seen.append(player_clients)
+        raise JobError(errors.SOURCE_BLOCKED, "Sign in to confirm you're not a bot", retryable=True)
+
+    monkeypatch.setattr(ytdlp, "fetch_metadata", blocked)
+    process(_job(bucket, "x.mp4", via="ytdlp"))
+    assert seen == ["default,mweb"]
+
+
+def test_a_pot_server_that_cannot_start_costs_the_token_not_the_job(tmp_path, monkeypatch):
+    from postiz_uploader import pot
+
+    # a directory with no server in it, then one whose process dies at once
+    monkeypatch.setenv("POT_SERVER_DIR", str(tmp_path))
+    monkeypatch.setattr(pot, "_listening", lambda: False)
+    assert pot.ensure(get_settings()) is False
+
+    monkeypatch.setattr(pot, "_spawn", lambda settings: subprocess.Popen(["false"]))
+    assert pot.ensure(get_settings()) is False
+    pot.stop()
