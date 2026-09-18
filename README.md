@@ -858,3 +858,10 @@ For orientation only. None of this lives in this repo and none of it is built ye
 6. **Done (0.2.0).** `ingest` and `clip` job types, their schemas, yt-dlp + Deno and
    caption fonts in both images, tests on generated fixtures including the yt-dlp
    route through its generic extractor.
+7. **Done.** Endpoint `postiz-clipper` (id `or9bfqyb37w9ze`), same GPU pinning, image
+   `0.2.0-gpu`, `WORKER_CONCURRENCY=2`, min 0 / max 10 workers, idle 60 s
+   (`postiz-uploader` is max 20; the account quota is 30). First L4 run, 2026-09-18:
+   a two-clip blur-fit job with captions rendered in 11 s with `decode: cuda` +
+   `h264_nvenc`, and a YouTube ingest succeeded on the direct route with no proxy
+   (`proxied: false`). One video from one address proves little about bot checks at
+   volume; `INGEST_PROXY` is still unset.
