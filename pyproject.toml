@@ -1,6 +1,6 @@
 [project]
 name = "postiz-uploader"
-version = "0.3.0"
+version = "0.3.1"
 description = "Stateless media normalization worker (ffmpeg + Pillow) for RunPod Serverless"
 requires-python = ">=3.10"
 

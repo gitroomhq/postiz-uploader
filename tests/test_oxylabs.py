@@ -39,8 +39,10 @@ def _work(work_dir):
 class FakeOxylabs:
     """Answers the three sources; a download "delivers" a fixture into the local bucket."""
 
-    def __init__(self, bucket, fixtures_dir, *, captions=None, duration=600, extension="mp4", hints=True):
-        self.bucket, self.fixtures_dir = bucket, fixtures_dir
+    def __init__(
+        self, bucket, fixtures_dir, *, captions=None, duration=600, extension="mp4", hints=True, bad_metadata=0
+    ):
+        self.bucket, self.fixtures_dir, self.bad_metadata = bucket, fixtures_dir, bad_metadata
         self.captions, self.duration, self.extension, self.hints = captions or {}, duration, extension, hints
         self.calls: list[dict] = []
 
@@ -51,6 +53,10 @@ class FakeOxylabs:
         context = {c["key"]: c["value"] for c in payload.get("context", [])}
         if payload["source"] == "youtube_metadata":
             assert payload["parse"] is True  # the source answers HTTP 400 without it
+            if self.bad_metadata > 0:
+                # seen live: 200 with content that is not the parsed object
+                self.bad_metadata -= 1
+                return {"results": [{"status_code": 200, "content": "<html>"}]}
             # the real thing: numbers and booleans arrive as strings
             data = {
                 "title": "Big Buck Bunny",
@@ -87,6 +93,7 @@ def configured(bucket, monkeypatch):
     monkeypatch.setenv("OXYLABS_PASSWORD", "hunter2")
     monkeypatch.setenv("OXYLABS_STORAGE_URL", bucket["base"].replace("http://", "http://KEY:SECRET@") + "/oxy/in")
     monkeypatch.setattr(oxylabs, "POLL_SECONDS", 0)
+    monkeypatch.setattr(oxylabs, "METADATA_RETRY_SECONDS", 0)
 
 
 @pytest.fixture
@@ -302,3 +309,17 @@ def test_a_storage_url_without_a_folder_fails_once_and_before_the_download_is_pa
     assert result["failure"]["code"] == errors.INVALID_JOB and result["failure"]["retryable"] is False
     assert "bucket/folder" in result["failure"]["message"] and "s3cr3tvalue" not in str(result)
     assert api.downloads() == []
+
+
+def test_an_unparsed_metadata_answer_is_retried_inside_the_job(bucket, fake):
+    api = fake(captions={("en", "auto_generated"): ASR}, bad_metadata=2)
+    result = process(_job(bucket, transcript=True))
+    assert result["status"] == "completed" and result["source"]["title"] == "Big Buck Bunny"
+    assert [p["source"] for p in api.calls].count("youtube_metadata") == 3
+
+
+def test_metadata_that_never_parses_fails_the_job_as_retryable(bucket, fake):
+    api = fake(bad_metadata=99)
+    result = process(_job(bucket, video=True))
+    assert result["failure"]["code"] == errors.DOWNLOAD_FAILED and result["failure"]["retryable"] is True
+    assert "3 times" in result["failure"]["message"] and api.downloads() == []

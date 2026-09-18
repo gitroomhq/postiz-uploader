@@ -36,6 +36,8 @@ QUERIES_URL = "https://data.oxylabs.io/v1/queries"
 CONNECT_TIMEOUT = 10
 REALTIME_TIMEOUT = 150
 POLL_SECONDS = 4
+METADATA_ATTEMPTS = 3
+METADATA_RETRY_SECONDS = 2
 # "done" is reported a moment before the object is readable on some stores
 DELIVERY_WAIT_SECONDS = 30
 QUALITIES = (144, 360, 480, 720, 1080, 1440, 2160, 4320)
@@ -147,12 +149,26 @@ def _thumbnail(data: dict) -> str | None:
 
 
 def metadata(settings: Settings, vid: str, deadline: float) -> dict:
-    status, content = _realtime(settings, {"source": "youtube_metadata", "query": vid, "parse": True}, deadline)
-    _raise_unavailable(status)
-    if status == 404:
-        raise JobError(errors.SOURCE_UNAVAILABLE, "video not found")
-    if status != 200 or not isinstance(content, dict):
-        raise JobError(errors.DOWNLOAD_FAILED, f"oxylabs metadata returned status {status}", retryable=True)
+    # Now and then the source answers 200 without a parsed result; the same request a
+    # moment later is fine (seen live 2026-09-18), so that is absorbed here rather than
+    # costing the caller a whole job.
+    for attempt in range(METADATA_ATTEMPTS):
+        status, content = _realtime(settings, {"source": "youtube_metadata", "query": vid, "parse": True}, deadline)
+        _raise_unavailable(status)
+        if status == 404:
+            raise JobError(errors.SOURCE_UNAVAILABLE, "video not found")
+        if status == 200 and isinstance(content, dict):
+            break
+        kind = type(content).__name__
+        log(logger, "oxylabs metadata was not usable", status=status, content=kind, attempt=attempt + 1)
+        if attempt + 1 < METADATA_ATTEMPTS:
+            time.sleep(METADATA_RETRY_SECONDS)
+    else:
+        raise JobError(
+            errors.DOWNLOAD_FAILED,
+            f"oxylabs metadata returned status {status} without a parsed result, {METADATA_ATTEMPTS} times",
+            retryable=True,
+        )
     data = content.get("results") if isinstance(content.get("results"), dict) else content
     uploaded = data.get("user_subtitle_languages")
     return {
