@@ -134,7 +134,7 @@ def isobmff_faststart(path: str) -> bool | None:
             offset += size
 
 
-def probe(ffprobe_bin: str, path: str, *, timeout: float = 60) -> SourceInfo:
+def probe(ffprobe_bin: str, path: str, *, timeout: float = 60, audio_only: bool = False) -> SourceInfo:
     cmd = [
         ffprobe_bin,
         "-v",
@@ -173,6 +173,26 @@ def probe(ffprobe_bin: str, path: str, *, timeout: float = 60) -> SourceInfo:
     if video is None:
         video = next((s for s in streams if s.get("codec_type") == "video"), None)
     audio = next((s for s in streams if s.get("codec_type") == "audio"), None)
+    if video is None and audio_only and audio is not None:
+        # an ingest that only wants the audio is handed an audio file (Oxylabs
+        # delivers raw AAC for download_type=audio): there is no picture to describe
+        return SourceInfo(
+            container=_container(fmt, streams),
+            video_codec=None,
+            profile=None,
+            pixel_format=None,
+            color_transfer=None,
+            color_primaries=None,
+            width=0,
+            height=0,
+            rotation=0,
+            fps=None,
+            duration_seconds=_fraction(fmt.get("duration")) or _fraction(audio.get("duration")),
+            bytes=int(fmt.get("size") or 0),
+            audio_codec=audio.get("codec_name"),
+            audio_sample_rate=int(audio["sample_rate"]) if audio.get("sample_rate") else None,
+            faststart=isobmff_faststart(path),
+        )
     if video is None:
         raise JobError(errors.UNSUPPORTED_INPUT, "no video stream")
 

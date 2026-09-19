@@ -76,6 +76,25 @@ def test_audio_only_ingest_uploads_no_video(bucket, fixtures_dir):
 
 
 @needs_ffmpeg
+def test_probe_accepts_an_audio_file_only_for_an_audio_only_ingest(tmp_path):
+    """Oxylabs delivers raw AAC when only the audio is asked for; there is no video stream to find."""
+    from postiz_uploader.errors import JobError
+
+    path = str(tmp_path / "speech.aac")
+    subprocess.run(
+        [get_settings().ffmpeg_bin, "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=3",
+         "-c:a", "aac", "-f", "adts", path],
+        check=True,
+    )
+    info = probe(get_settings().ffprobe_bin, path, audio_only=True)
+    assert info.has_audio and info.video_codec is None and (info.width, info.height) == (0, 0)
+
+    with pytest.raises(JobError) as refused:
+        probe(get_settings().ffprobe_bin, path)
+    assert refused.value.code == errors.UNSUPPORTED_INPUT
+
+
+@needs_ffmpeg
 def test_too_long_fails_but_still_reports_the_duration(bucket, fixtures_dir):
     _stage(bucket, fixtures_dir, "talk-8s.mp4")
     result = process(_job(bucket, "talk-8s.mp4", limits={"max_duration_seconds": 5}))

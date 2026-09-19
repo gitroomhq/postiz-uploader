@@ -7,10 +7,12 @@ import datetime
 import json
 import os
 import shutil
+import subprocess
 
 import pytest
 
 from postiz_uploader import errors, oxylabs
+from postiz_uploader.config import get_settings
 from postiz_uploader.errors import JobError
 from postiz_uploader.pipeline import process
 from postiz_uploader.schema import validate_result
@@ -78,7 +80,15 @@ class FakeOxylabs:
         assert payload["storage_type"] == "s3_compatible" and "SECRET" in payload["storage_url"]
         target = os.path.join(self.bucket["root"], "oxy", "in", f"{VIDEO_ID}_job1.{self.extension}")
         os.makedirs(os.path.dirname(target), exist_ok=True)
-        shutil.copy(os.path.join(self.fixtures_dir, FIXTURE), target)
+        if context.get("download_type") == "audio":
+            # the real thing: an audio download is raw ADTS AAC, there is no picture in it
+            subprocess.run(
+                [get_settings().ffmpeg_bin, "-v", "error", "-y", "-i", os.path.join(self.fixtures_dir, FIXTURE),
+                 "-vn", "-c:a", "aac", "-f", "adts", target],
+                check=True,
+            )
+        else:
+            shutil.copy(os.path.join(self.fixtures_dir, FIXTURE), target)
         return {"id": "job1", "status": "pending"}
 
     def downloads(self) -> list[dict]:

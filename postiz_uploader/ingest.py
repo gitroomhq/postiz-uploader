@@ -276,7 +276,9 @@ def process_ingest(
         timing["download"] = int((time.monotonic() - t) * 1000)
 
         t = time.monotonic()
-        info = probe(settings.ffprobe_bin, media_path, timeout=min(60, max(_remaining(deadline), 1)))
+        info = probe(
+            settings.ffprobe_bin, media_path, timeout=min(60, max(_remaining(deadline), 1)), audio_only=not job.video
+        )
         timing["probe"] = int((time.monotonic() - t) * 1000)
         known = partial["source"].get("duration_seconds")
         partial["source"].update(
