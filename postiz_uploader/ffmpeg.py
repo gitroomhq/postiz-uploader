@@ -302,9 +302,13 @@ def clip_filter(
         # the background is blurred at quarter size: cheaper, and softer once scaled back up
         bw, bh = max(w // 8 * 2, 2), max(h // 8 * 2, 2)
         pre = ",".join(head) + "," if head else ""
+        # NVDEC hands frames back as nv12, whose two chroma channels share one plane;
+        # boxblur blurs them as if they were one and the background turns green. Going
+        # planar after the downscale costs a conversion of the small picture only
         graph = (
             f"{pre}split=2[bg][fg];"
-            f"[bg]scale={bw}:{bh}:force_original_aspect_ratio=increase,crop={bw}:{bh},boxblur=8:2,"
+            f"[bg]scale={bw}:{bh}:force_original_aspect_ratio=increase,format=yuv420p,"
+            f"crop={bw}:{bh},boxblur=8:2,"
             f"scale={w}:{h}:flags=bilinear[bgb];"
             f"[fg]scale={w}:{h}:force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos[fgs];"
             f"[bgb][fgs]overlay=(W-w)/2:(H-h)/2"

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 
 import pytest
 
@@ -178,6 +179,27 @@ def test_filter_graph_shapes():
     )
     assert blur.startswith("split=2[bg][fg];") and "overlay=(W-w)/2:(H-h)/2" in blur
     assert "ass=filename='/w/c.ass':fontsdir='/fonts'" in blur
+
+
+@needs_ffmpeg
+def test_blur_background_keeps_its_colour_on_nv12_frames(tmp_path):
+    """NVDEC output is nv12; the blurred background of a red picture has to stay red."""
+    vf = clip_filter(
+        Frame(fit="blur"), focus_x=0.5, focus_y=0.5, fps_cap=None, tonemap=False, pixel_format="yuv420p",
+        ass_path=None, fonts_dir=None,
+    )
+    out = tmp_path / "pixel.rgb"
+    subprocess.run(
+        [
+            get_settings().ffmpeg_bin, "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=red:s=1280x720:d=1",
+            # a pixel of the background, well above the picture in the middle of the canvas
+            "-vf", f"format=nv12,{vf},crop=2:2:540:100", "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24",
+            str(out),
+        ],
+        check=True,
+    )
+    red, green, blue = out.read_bytes()[:3]
+    assert red > 200 and green < 60 and blue < 60, (red, green, blue)
 
 
 def test_filter_path_survives_both_parsing_passes():
