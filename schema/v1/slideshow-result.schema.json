@@ -1,0 +1,160 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/gitroomhq/postiz-uploader/schema/v1/slideshow-result.schema.json",
+  "title": "SlideshowResult",
+  "description": "Keys with a null value may be omitted by the transport; treat a missing key as null. The failure block is named `failure`, not `error` (see result.schema.json). A slideshow has one output, so there is no partial status: it is uploaded only when every slide rendered.",
+  "type": "object",
+  "required": [
+    "version",
+    "type",
+    "reference",
+    "status"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "type": {
+      "const": "slideshow"
+    },
+    "reference": {
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "completed",
+        "failed"
+      ]
+    },
+    "output": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "width": {
+          "type": "integer"
+        },
+        "height": {
+          "type": "integer"
+        },
+        "duration_seconds": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "bytes": {
+          "type": "integer"
+        },
+        "content_type": {
+          "type": "string"
+        },
+        "video_codec": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "audio_codec": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fps": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "slides": {
+          "type": "integer"
+        },
+        "subtitle_cues": {
+          "type": "integer",
+          "description": "Cues burned in; 0 when none were given or none fell inside the video."
+        }
+      }
+    },
+    "timing_ms": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer"
+      }
+    },
+    "worker": {
+      "type": "object",
+      "properties": {
+        "encoder": {
+          "type": "string"
+        },
+        "decode": {
+          "enum": [
+            "cuda",
+            "software",
+            null
+          ]
+        },
+        "ffmpeg": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "gpu": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "version": {
+          "type": "string"
+        }
+      }
+    },
+    "failure": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "required": [
+        "code",
+        "message",
+        "retryable"
+      ],
+      "properties": {
+        "code": {
+          "enum": [
+            "UNSUPPORTED_VERSION",
+            "INVALID_JOB",
+            "SOURCE_HOST_NOT_ALLOWED",
+            "DOWNLOAD_FAILED",
+            "SOURCE_BLOCKED",
+            "SOURCE_UNAVAILABLE",
+            "INPUT_TOO_LARGE",
+            "UNSUPPORTED_INPUT",
+            "PROBE_FAILED",
+            "DURATION_TOO_LONG",
+            "ENCODE_FAILED",
+            "UPLOAD_FAILED",
+            "TIMEOUT",
+            "INTERNAL"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "stderr_tail": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  }
+}

@@ -11,10 +11,11 @@ from dataclasses import dataclass
 from functools import lru_cache
 
 from postiz_uploader import errors
+from postiz_uploader.config import Settings
 from postiz_uploader.errors import JobError
 from postiz_uploader.planner import Plan
 from postiz_uploader.probe import SourceInfo
-from postiz_uploader.schema import Frame, VideoRules
+from postiz_uploader.schema import Frame, SlideshowVideo, VideoRules
 
 STDERR_TAIL = 4096
 BASE_ARGS = ["-y", "-nostdin", "-hide_banner", "-loglevel", "error"]
@@ -30,6 +31,29 @@ _TRANSPOSE = {
     180: ["transpose_npp=dir=clock", "transpose_npp=dir=clock"],
     270: ["transpose_npp=dir=cclock"],
 }
+
+
+class Encoders:
+    """The (encoder, cuda decode) combinations to try, best first.
+
+    A combination that failed for one output will fail for the next one too (it is a
+    property of the host and the source, not of the cut), so it is dropped for the
+    rest of the job. `cuda_decode` adds the NVDEC rung, which only makes sense for a
+    video source that is neither HDR nor a still image.
+    """
+
+    def __init__(self, settings: Settings, cuda_decode: bool):
+        if settings.gpu:
+            self.attempts = [(settings.encoder, False), ("libx264", False)]
+            if cuda_decode:
+                self.attempts.insert(0, (settings.encoder, True))
+        else:
+            self.attempts = [(settings.encoder, False)]
+        self.used: tuple[str, bool] | None = None
+
+    def drop(self, attempt: tuple[str, bool]) -> None:
+        if len(self.attempts) > 1:
+            self.attempts.remove(attempt)
 
 
 @dataclass(frozen=True)
@@ -116,7 +140,7 @@ def _audio_args(plan: Plan, info: SourceInfo, rules: VideoRules) -> list[str]:
     return args
 
 
-def _encoder_args(encoder: str, rules: VideoRules) -> list[str]:
+def _encoder_args(encoder: str, rules: VideoRules | SlideshowVideo) -> list[str]:
     if encoder == "h264_nvenc":
         return [
             "-c:v",
@@ -369,4 +393,121 @@ def build_clip(
     else:
         cmd += ["-an"]
     cmd += ["-movflags", "+faststart", "-f", rules.container, dst]
+    return cmd
+
+
+def slide_filter(frame: Frame, *, fit: str, fps: float, pixel_format: str) -> str:
+    """One still image -> the slideshow canvas, as a constant frame rate stream."""
+    w, h = frame.width, frame.height
+    if fit == "cover":
+        picture = [
+            f"scale={w}:{h}:force_original_aspect_ratio=increase:flags=lanczos",
+            f"crop={w}:{h}",
+        ]
+    else:
+        picture = [
+            f"scale={w}:{h}:force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos",
+            f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black",
+        ]
+    return ",".join([*picture, "setsar=1", f"fps=fps={fps:g}", f"format={pixel_format}"])
+
+
+def _slideshow_audio_args(rules: SlideshowVideo) -> list[str]:
+    return ["-c:a", "aac", "-b:a", f"{rules.audio_bitrate_kbps}k", "-ar", str(rules.audio_sample_rate), "-ac", "2"]
+
+
+def build_slide(
+    ffmpeg_bin: str,
+    image: str,
+    audio: str,
+    dst: str,
+    *,
+    duration: float,
+    audio_delay: float,
+    vf: str,
+    rules: SlideshowVideo,
+    encoder: str,
+) -> list[str]:
+    """One slide: the image looped for `duration`, the audio starting `audio_delay` in
+    and padded with silence to the same length, so every part the assemble pass joins
+    has one continuous audio track."""
+    af = (
+        f"aresample={rules.audio_sample_rate},aformat=channel_layouts=stereo,"
+        f"adelay={int(round(audio_delay * 1000))}:all=1,apad"
+    )
+    return [
+        ffmpeg_bin,
+        *BASE_ARGS,
+        "-loop",
+        "1",
+        "-framerate",
+        f"{rules.fps:g}",
+        "-i",
+        image,
+        "-i",
+        audio,
+        "-t",
+        f"{duration:.3f}",
+        "-filter_complex",
+        f"[0:v]{vf}[v];[1:a]{af}[a]",
+        "-map",
+        "[v]",
+        "-map",
+        "[a]",
+        "-r",
+        f"{rules.fps:g}",
+        *_encoder_args(encoder, rules),
+        *_slideshow_audio_args(rules),
+        "-movflags",
+        "+faststart",
+        "-f",
+        "mp4",
+        dst,
+    ]
+
+
+def build_slideshow(
+    ffmpeg_bin: str,
+    parts: list[str],
+    dst: str,
+    *,
+    offsets: list[float],
+    transition: float,
+    rules: SlideshowVideo,
+    encoder: str,
+    ass_path: str | None,
+    fonts_dir: str | None,
+) -> list[str]:
+    """Join the rendered slides into one video and burn the subtitles in.
+
+    With a transition every boundary is an xfade/acrossfade pair whose offset is the
+    start of the next slide on the output timeline (`offsets[k]`, see
+    slideshow.timeline); without one the parts are concatenated as they are.
+    """
+    n = len(parts)
+    chains: list[str] = []
+    if transition > 0 and n > 1:
+        video, audio = "[0:v]", "[0:a]"
+        for k in range(1, n):
+            chains.append(f"{video}[{k}:v]xfade=transition=fade:duration={transition:g}:offset={offsets[k]:.3f}[v{k}]")
+            chains.append(f"{audio}[{k}:a]acrossfade=d={transition:g}[a{k}]")
+            video, audio = f"[v{k}]", f"[a{k}]"
+    else:
+        streams = "".join(f"[{k}:v][{k}:a]" for k in range(n))
+        chains.append(f"{streams}concat=n={n}:v=1:a=1[vc][ac]")
+        video, audio = "[vc]", "[ac]"
+    if ass_path:
+        ass = f"ass=filename={filter_path(ass_path)}"
+        if fonts_dir:
+            ass += f":fontsdir={filter_path(fonts_dir)}"
+        chains.append(f"{video}{ass}[vs]")
+        video = "[vs]"
+
+    cmd = [ffmpeg_bin, *BASE_ARGS]
+    for part in parts:
+        cmd += ["-i", part]
+    cmd += ["-filter_complex", ";".join(chains), "-map", video, "-map", audio, "-r", f"{rules.fps:g}"]
+    cmd += _encoder_args(encoder, rules)
+    cmd += _slideshow_audio_args(rules)
+    cmd += ["-movflags", "+faststart", "-f", "mp4", dst]
     return cmd

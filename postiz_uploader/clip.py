@@ -13,6 +13,7 @@ from postiz_uploader import errors, ffmpeg
 from postiz_uploader.captions import build_ass
 from postiz_uploader.config import Settings
 from postiz_uploader.errors import JobError
+from postiz_uploader.ffmpeg import Encoders
 from postiz_uploader.log import get_logger, log
 from postiz_uploader.probe import SourceInfo, probe
 from postiz_uploader.schema import Clip, ClipJob
@@ -27,28 +28,6 @@ def _remaining(deadline: float) -> float:
     return deadline - time.monotonic()
 
 
-class _Encoders:
-    """The (encoder, cuda decode) combinations to try, best first.
-
-    A combination that failed for one clip will fail for the next one too (it is a
-    property of the host and the source, not of the cut), so it is dropped for the
-    rest of the job.
-    """
-
-    def __init__(self, settings: Settings, tonemap: bool):
-        if settings.gpu:
-            self.attempts = [(settings.encoder, False), ("libx264", False)]
-            if not tonemap:
-                self.attempts.insert(0, (settings.encoder, True))
-        else:
-            self.attempts = [(settings.encoder, False)]
-        self.used: tuple[str, bool] | None = None
-
-    def drop(self, attempt: tuple[str, bool]) -> None:
-        if len(self.attempts) > 1:
-            self.attempts.remove(attempt)
-
-
 def _render(
     job: ClipJob,
     clip: Clip,
@@ -59,7 +38,7 @@ def _render(
     workdir: str,
     settings: Settings,
     deadline: float,
-    encoders: _Encoders,
+    encoders: Encoders,
 ) -> dict:
     start, end = window
     duration = end - start
@@ -194,7 +173,7 @@ def process_clips(
     timing["probe"] = int((time.monotonic() - t) * 1000)
     partial["source"] = info.to_dict()
 
-    encoders = _Encoders(settings, info.is_hdr)
+    encoders = Encoders(settings, cuda_decode=not info.is_hdr)
     results = []
     t = time.monotonic()
     for index, clip in enumerate(job.clips):

@@ -197,6 +197,14 @@ def make(out_dir: str) -> dict[str, str]:
     _image(p("medium.webp"), 1600, 900, "RGBA", "WEBP", quality=85)
     frames = [Image.new("RGB", (64, 64), (i * 60, 100, 200 - i * 40)) for i in range(4)]
     frames[0].save(p("animated.gif"), format="GIF", save_all=True, append_images=frames[1:], duration=100, loop=0)
+    # slideshow inputs: a slide picture and a one second voice track (mp3 like
+    # ElevenLabs delivers when the encoder is there, otherwise plain pcm)
+    _image(p("slide-64.png"), 64, 64, "RGB", "PNG")
+    voice = ["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100:duration=1"]
+    if _has_encoder("libmp3lame"):
+        _ffmpeg(*voice, "-c:a", "libmp3lame", "-b:a", "128k", p("voice-1s.mp3"))
+    else:
+        _ffmpeg(*voice, "-c:a", "pcm_s16le", p("voice-1s.wav"))
     return made
 
 

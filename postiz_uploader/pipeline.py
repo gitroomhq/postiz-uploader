@@ -15,7 +15,8 @@ from postiz_uploader.errors import JobError
 from postiz_uploader.image import process_image
 from postiz_uploader.ingest import process_ingest
 from postiz_uploader.log import get_logger, log, redact_url, setup_logging
-from postiz_uploader.schema import ClipJob, IngestJob, parse_job
+from postiz_uploader.schema import ClipJob, IngestJob, SlideshowJob, parse_job
+from postiz_uploader.slideshow import process_slideshow
 from postiz_uploader.sniff import sniff
 from postiz_uploader.upload import upload
 from postiz_uploader.video import process_video
@@ -78,6 +79,7 @@ def _capture(exc: BaseException) -> None:
 _STAGED_BLANK = {
     "ingest": {"source": None, "video": None, "audio": None, "transcript": None},
     "clip": {"source": None, "clips": []},
+    "slideshow": {"output": None},
 }
 
 
@@ -89,9 +91,10 @@ def _staged_result(job_type: str, reference: str, status: str, **fields) -> dict
     return base
 
 
-def _process_staged(job: IngestJob | ClipJob, settings: Settings, started: float) -> dict:
-    """ingest and clip: same guarantees as process() (never raises, always cleans up),
-    but the stage owns its downloads and uploads because each has several outputs."""
+def _process_staged(job: IngestJob | ClipJob | SlideshowJob, settings: Settings, started: float) -> dict:
+    """ingest, clip and slideshow: same guarantees as process() (never raises, always
+    cleans up), but the stage owns its downloads and uploads because each has several
+    inputs or outputs."""
     timing: dict[str, int] = {}
     # filled by the stage as facts become known, so a failure still reports them
     partial: dict = {}
@@ -104,6 +107,8 @@ def _process_staged(job: IngestJob | ClipJob, settings: Settings, started: float
 
         if isinstance(job, IngestJob):
             fields = process_ingest(job, workdir, settings, deadline, timing, partial)
+        elif isinstance(job, SlideshowJob):
+            fields = process_slideshow(job, workdir, settings, deadline, timing)
         else:
             if not host_allowed(job.source.url, settings.allowed_source_hosts):
                 raise JobError(
@@ -185,7 +190,7 @@ def process(raw_job: object) -> dict:
             return _staged_result(staged, reference, "failed", failure=err.to_dict(), worker=worker)
         return _result(reference, "failed", failure=err.to_dict(), worker=worker)
 
-    if isinstance(job, (IngestJob, ClipJob)):
+    if isinstance(job, (IngestJob, ClipJob, SlideshowJob)):
         return _process_staged(job, settings, started)
 
     workdir = None
