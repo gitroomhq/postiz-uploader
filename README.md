@@ -837,10 +837,8 @@ docker compose up --build                                  # worker API on :8000
   longer than the caller's request timeout, which is most videos of a few hundred MB
   once download, encode and upload are added up, times out and is then reported as
   "Job ID not found". Short jobs pass, so the problem only shows with realistic files.
-  `scripts/run-local.py --endpoint` is unaffected by that timeout, since it uses
-  `/runsync`. `devapi`'s `/runsync` waits 90 seconds and then returns the job still
-  `IN_PROGRESS`, and the script does not poll, so through compose `--endpoint` only
-  suits jobs under 90 seconds.
+  `scripts/run-local.py --endpoint` is unaffected, since it uses `/runsync`, which
+  `devapi` holds open until the job finishes.
 
   `devapi` follows the documented API instead: `POST /run` answers
   `{"id", "status": "IN_QUEUE"}` at once and runs the job on `WORKER_CONCURRENCY`

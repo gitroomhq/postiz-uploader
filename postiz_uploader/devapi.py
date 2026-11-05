@@ -2,7 +2,7 @@
 
 POST /run         queue a job, answer at once with its id
 GET  /status/<id> report on a job, never run it
-POST /runsync     queue a job and wait for it
+POST /runsync     queue a job and wait until it finishes
 
 The paths take an optional /v2/<endpoint> prefix, so a caller pointed at
 https://api.runpod.ai/v2/<endpoint> only swaps the host. Jobs run through
@@ -29,9 +29,8 @@ from functools import partial
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROUTE = re.compile(r"^(?:/v2/[^/]+)?/(run|runsync|status)(?:/([^/?]+))?/?(?:\?.*)?$")
-# RunPod keeps /run results for 30 minutes and waits 90 seconds on /runsync by default
+# RunPod keeps /run results for 30 minutes
 RETENTION_SECONDS = 30 * 60
-RUNSYNC_WAIT_SECONDS = 90
 PUBLIC_FIELDS = ("id", "status", "delayTime", "executionTime", "output", "error")
 
 
@@ -120,7 +119,7 @@ class Handler(BaseHTTPRequestHandler):
         job = self.jobs.submit(body.get("input"))
         if operation == "run":
             return self._send(200, {"id": job["id"], "status": "IN_QUEUE"})
-        job["done"].wait(RUNSYNC_WAIT_SECONDS)
+        job["done"].wait()
         return self._send(200, Jobs.public(job))
 
     def _read_json(self) -> object:
