@@ -66,12 +66,14 @@ class Jobs:
         job["status"] = "IN_PROGRESS"
         try:
             job["output"] = self._run(job_input)
-            job["status"] = "COMPLETED"
+            status = "COMPLETED"
         except Exception as exc:  # a handler that raises is a FAILED job on RunPod
             job["error"] = str(exc)
-            job["status"] = "FAILED"
+            status = "FAILED"
         job["executionTime"] = int((time.monotonic() - started) * 1000)
         job["finished"] = time.monotonic()
+        # last, so a poll that sees a terminal status also sees the timing fields
+        job["status"] = status
         job["done"].set()
 
     def _expire(self) -> None:
@@ -157,7 +159,7 @@ if __name__ == "__main__":
     from postiz_uploader.pipeline import process
 
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
     setup_logging()

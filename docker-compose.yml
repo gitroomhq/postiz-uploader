@@ -29,7 +29,7 @@ services:
       ALLOWED_SOURCE_HOSTS: bucket,host.docker.internal,*.r2.cloudflarestorage.com
       WORKER_CONCURRENCY: "1"
       LOG_LEVEL: info
-    command: ["python", "-m", "postiz_uploader.devapi", "--port", "8000"]
+    command: ["python", "-m", "postiz_uploader.devapi", "--host", "0.0.0.0", "--port", "8000"]
     ports:
       - "${UPLOADER_PORT:-8000}:8000"
     # lets run-local.py --bucket-host host.docker.internal serve files from the host
