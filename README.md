@@ -98,6 +98,7 @@ postiz_uploader/
   oxylabs.py                  ingest via Oxylabs: metadata, captions, downloads into a bucket
   clip.py  captions.py        clip stage; word timings -> ASS subtitles (pure)
   devserver.py                GET/PUT file server used by tests, compose and scripts
+  devapi.py                   RunPod /run + /status stand-in for local callers
 schema/v1/                    job + result schemas per job type (vendored by the caller)
 scripts/                      make_fixtures.py, run-local.py, bench.py
 tests/                        planner/schema/unit tests + end-to-end on generated fixtures
@@ -809,11 +810,45 @@ docker compose up --build                                  # worker API on :8000
 - `scripts/run-local.py` runs one job in-process by default (no RunPod involved),
   serving the file from a throwaway local server and moving outputs to
   `bench-results/`. With `--endpoint` it posts the same job to a running worker API.
-- `docker compose up` builds the `cpu` image and starts the RunPod local API
-  (`python handler.py --rp_serve_api`) on port 8000, plus `postiz_uploader.devserver`
-  on port 8080 as the bucket stand-in.
+- `docker compose up` builds the `cpu` image and starts the RunPod stand-in
+  (`python -m postiz_uploader.devapi`, below) on port 8000, plus
+  `postiz_uploader.devserver` on port 8080 as the bucket stand-in. `UPLOADER_PORT` and
+  `BUCKET_PORT` move them, and `-p <name>` keeps one worktree's containers apart from
+  another's. For a local Postiz on R2 only the worker is needed. A local Temporal for
+  Postiz usually holds port 8000 already (and its UI 8080), so move the worker:
+  `UPLOADER_PORT=18000 docker compose -p uploader-<worktree> up --build --no-deps uploader`,
+  then start Postiz with `RUNPOD_API_URL=http://localhost:18000/v2` and any
+  `RUNPOD_API_KEY` and `RUNPOD_ENDPOINT_ID`.
 - `postiz_uploader.devserver` is the GET/PUT file server used by the tests, compose and
   the scripts. It is dev tooling and is never reachable in production.
+- `python -m postiz_uploader.devapi --port 8000` (`postiz_uploader/devapi.py`) stands in
+  for RunPod's hosted API when a real caller, such as a local Postiz, runs against a
+  local worker. Use it instead of `--rp_serve_api` whenever the caller talks to the
+  worker the way it talks to production.
+
+  In production there is no HTTP server in this repo: the caller sends `POST /run` to
+  `https://api.runpod.ai/v2/<endpoint>`, RunPod queues the job, `handler.py` pulls it
+  from that queue, and the caller polls `GET /status/<id>` until it is `COMPLETED` or
+  `FAILED` (section 3). Postiz does exactly that, with a 30 s timeout on each request.
+
+  The SDK's `--rp_serve_api` only simulates that flow. Its `/status` accepts POST only,
+  runs the job inside the first status call, and drops the job after that call. A
+  caller's first status request therefore lasts as long as the whole job. Any job
+  longer than the caller's request timeout, which is most videos of a few hundred MB
+  once download, encode and upload are added up, times out and is then reported as
+  "Job ID not found". Short jobs pass, so the problem only shows with realistic files.
+  `scripts/run-local.py --endpoint` is unaffected, since it uses `/runsync`, which
+  `devapi` holds open until the job finishes.
+
+  `devapi` follows the documented API instead: `POST /run` answers
+  `{"id", "status": "IN_QUEUE"}` at once and runs the job on `WORKER_CONCURRENCY`
+  threads through `pipeline.process`, the same function `handler.py` gives RunPod jobs
+  to. `GET /status/<id>` only reports `IN_QUEUE`, `IN_PROGRESS`, `COMPLETED` (with
+  `output`) or `FAILED` (with `error`). Results are kept 30 minutes, an unknown id is a
+  404, and the paths take an optional `/v2/<endpoint>` prefix, so a caller swaps only
+  the host. It does not reproduce RunPod's queue, autoscaling or GPU workers; check
+  those on a non-production endpoint. Dev tooling: the image still starts
+  `handler.py`, and nothing in production imports this module.
 
 ---
 
