@@ -88,7 +88,9 @@ def test_assemble_graph_shapes():
         "ffmpeg", ["a.mp4", "b.mp4"], "o.mp4", offsets=[0, 2], transition=0, rules=rules, encoder="libx264",
         ass_path=None, fonts_dir=None,
     )
-    assert cut[cut.index("-filter_complex") + 1] == "[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[vc][ac];[vc]format=yuv420p[vout]"
+    assert cut[cut.index("-filter_complex") + 1] == (
+        "[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[vc][ac];[vc]format=yuv420p[vout]"
+    )
 
 
 def test_defaults_are_applied(bucket):
