@@ -198,6 +198,8 @@ def process_slideshow(job: SlideshowJob, workdir: str, settings: Settings, deadl
         problems.append(f"dimensions={out.width}x{out.height}")
     if out.video_codec != "h264":
         problems.append(f"video_codec={out.video_codec}")
+    if out.pixel_format != rules.pixel_format:
+        problems.append(f"pixel_format={out.pixel_format}")
     if out.duration_seconds is None or abs(out.duration_seconds - total) > DURATION_TOLERANCE:
         problems.append(f"duration={out.duration_seconds} expected {total:.2f}")
     if out.faststart is not True:

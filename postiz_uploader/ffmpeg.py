@@ -502,6 +502,8 @@ def build_slideshow(
             ass += f":fontsdir={filter_path(fonts_dir)}"
         chains.append(f"{video}{ass}[vs]")
         video = "[vs]"
+    chains.append(f"{video}format={rules.pixel_format}[vout]")
+    video = "[vout]"
 
     cmd = [ffmpeg_bin, *BASE_ARGS]
     for part in parts:

@@ -81,13 +81,14 @@ def test_assemble_graph_shapes():
     assert "[0:v][1:v]xfade=transition=fade:duration=0.5:offset=1.500[v1]" in graph
     assert "[v1][2:v]xfade=transition=fade:duration=0.5:offset=4.000[v2]" in graph
     assert "[a1][2:a]acrossfade=d=0.5[a2]" in graph and "[v2]ass=filename='/w/s.ass'[vs]" in graph
-    assert joined[joined.index("-map") + 1] == "[vs]"
+    assert "[vs]format=yuv420p[vout]" in graph
+    assert joined[joined.index("-map") + 1] == "[vout]"
 
     cut = build_slideshow(
         "ffmpeg", ["a.mp4", "b.mp4"], "o.mp4", offsets=[0, 2], transition=0, rules=rules, encoder="libx264",
         ass_path=None, fonts_dir=None,
     )
-    assert cut[cut.index("-filter_complex") + 1] == "[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[vc][ac]"
+    assert cut[cut.index("-filter_complex") + 1] == "[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[vc][ac];[vc]format=yuv420p[vout]"
 
 
 def test_defaults_are_applied(bucket):
