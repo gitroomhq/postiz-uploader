@@ -130,6 +130,13 @@ def test_audio_44100_reencodes_audio_only(bucket, fixtures_dir):
     assert _out(r).audio_sample_rate == 48000
 
 
+def test_full_range_converted_to_limited(bucket, fixtures_dir):
+    r = _run(bucket, fixtures_dir, "full-range-1080p.mp4", "video", "video/mp4")
+    assert r["status"] == "completed", r["failure"]
+    assert r["actions"] == ["video_encode"]
+    assert _out(r).pixel_format == "yuv420p"
+
+
 def test_4k_hevc_downscaled(bucket, fixtures_dir):
     if not os.path.exists(os.path.join(fixtures_dir, "4k-hevc.mov")):
         pytest.skip("libx265 not available to build the fixture")

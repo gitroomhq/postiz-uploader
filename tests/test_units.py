@@ -148,6 +148,15 @@ def test_encode_command_tonemap_uses_cpu_chain():
         build_encode("ffmpeg", "in", "out.mp4", plan, info(), VideoRules(), encoder="h264_nvenc", cuda_decode=True)
 
 
+def test_encode_command_full_range_converts_on_cpu():
+    plan = Plan("encode", 1920, 1080, video_encode=True, actions=())
+    src = info(pixel_format="yuvj420p", color_range="pc")
+    cmd = build_encode("ffmpeg", "in", "out.mp4", plan, src, VideoRules(), encoder="h264_nvenc", cuda_decode=False)
+    assert "-vf scale=out_range=tv,format=yuv420p" in " ".join(cmd)
+    with pytest.raises(ValueError):
+        build_encode("ffmpeg", "in", "out.mp4", plan, src, VideoRules(), encoder="h264_nvenc", cuda_decode=True)
+
+
 def test_audio_only_encode_copies_video():
     plan = Plan("encode", 1920, 1080, video_encode=False, audio_encode=True, actions=())
     cmd = build_encode(

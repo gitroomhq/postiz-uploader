@@ -570,6 +570,12 @@ retries the same plan with software decode and NVENC encode, and reports
 `worker.decode: "software"`. A failure on both paths is `ENCODE_FAILED` with the
 second attempt's stderr.
 
+Colour range: a full-range source (`color_range == pc`, which ffprobe reports as a
+`yuvj*` pixel format for H.264) gets `scale=out_range=tv` before `format=`, because
+`format=` alone keeps the full-range flag and the output would probe as `yuvj420p`
+and fail the post-check. `scale_npp` cannot convert the range, so these sources skip
+CUDA decode and use software decode plus the CPU filter chain, like tone mapping.
+
 Rotation: on the CPU path ffmpeg applies the rotate tag automatically before the
 user filters (the target dimensions are already post-rotation) and the output has no
 tag. On the CUDA path autorotate is disabled and `transpose_npp` does the same on GPU

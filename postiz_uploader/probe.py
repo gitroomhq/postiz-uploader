@@ -31,6 +31,12 @@ class SourceInfo:
     audio_codec: str | None
     audio_sample_rate: int | None
     faststart: bool | None  # None when not an ISO BMFF file
+    color_range: str | None = None
+
+    @property
+    def full_range(self) -> bool:
+        # ffprobe reports full-range H.264 as a yuvj* pixel format
+        return self.color_range == "pc" or (self.pixel_format or "").startswith("yuvj")
 
     @property
     def has_audio(self) -> bool:
@@ -223,4 +229,5 @@ def probe(ffprobe_bin: str, path: str, *, timeout: float = 60, audio_only: bool 
         audio_codec=audio.get("codec_name") if audio else None,
         audio_sample_rate=int(audio["sample_rate"]) if audio and audio.get("sample_rate") else None,
         faststart=isobmff_faststart(path),
+        color_range=video.get("color_range"),
     )
