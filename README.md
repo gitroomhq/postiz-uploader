@@ -788,7 +788,8 @@ the HDR test additionally needs `zscale`, which the Docker images have.
   Every row above has a planner test asserting the expected `actions`.
 - **Integration**: run the full pipeline on each fixture against a local HTTP server
   that serves the source and accepts PUTs, and assert the post-check plus the result
-  document. Runs on the `cpu` image in CI.
+  document. Runs in CI on the runner, with the distribution's ffmpeg, before the images
+  are built.
 - **Contract**: JSON schema files for Job and Result under `schema/v1/`, validated in
   tests. The caller repo will vendor these files.
 
