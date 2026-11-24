@@ -1,7 +1,7 @@
 """Job parsing and validation against the schemas under schema/v1.
 
-`type` picks the schema: video and image share job.schema.json, ingest and clip have
-their own files (and their own result schemas).
+`type` picks the schema: video and image share job.schema.json, ingest, clip and
+slideshow have their own files (and their own result schemas).
 
 The JSON schema is the contract the caller vendors. This module validates against
 it and then lifts the dict into dataclasses with every default applied, so the
@@ -214,12 +214,80 @@ class ClipJob:
     limits: ClipLimits
 
 
+@dataclass(frozen=True)
+class Slide:
+    image_url: str
+    audio_url: str
+    duration_seconds: float | None = None
+
+
+@dataclass(frozen=True)
+class SubtitleCue:
+    start: float
+    end: float
+    text: str
+
+
+@dataclass(frozen=True)
+class SubtitleStyle:
+    font: str = "Montserrat"
+    bold: bool = True
+    font_size: int | None = None
+    color: str = "#FFFFFF"
+    outline_color: str = "#000000"
+    outline: float = 4
+    shadow: float = 0
+    position: str = "middle"
+    margin_v: int | None = None
+
+
+@dataclass(frozen=True)
+class Subtitles:
+    cues: tuple[SubtitleCue, ...]
+    style: SubtitleStyle
+
+
+@dataclass(frozen=True)
+class SlideshowVideo:
+    profile: str = "high"
+    pixel_format: str = "yuv420p"
+    fps: float = 30
+    quality: int = 23
+    max_bitrate_kbps: int | None = None
+    audio_bitrate_kbps: int = 128
+    audio_sample_rate: int = 48000
+
+
+@dataclass(frozen=True)
+class SlideshowLimits:
+    max_input_bytes: int = 100 * 1024 * 1024
+    timeout_seconds: float = 1200
+
+
+@dataclass(frozen=True)
+class SlideshowJob:
+    version: int
+    type: str
+    reference: str
+    slides: tuple[Slide, ...]
+    frame: Frame
+    fit: str
+    audio_delay_seconds: float
+    tail_seconds: float
+    transition_seconds: float
+    subtitles: Subtitles | None
+    output: Output
+    video: SlideshowVideo
+    limits: SlideshowLimits
+
+
 # job type -> (job schema, result schema)
 SCHEMAS = {
     "video": ("job", "result"),
     "image": ("job", "result"),
     "ingest": ("ingest", "ingest-result"),
     "clip": ("clip", "clip-result"),
+    "slideshow": ("slideshow", "slideshow-result"),
 }
 
 
@@ -314,7 +382,47 @@ def _parse_clip(raw: dict) -> ClipJob:
     )
 
 
-def parse_job(raw: object) -> Job | IngestJob | ClipJob:
+def _parse_slideshow(raw: dict) -> SlideshowJob:
+    delay = float(raw.get("audio_delay_seconds", 0.5))
+    tail = float(raw.get("tail_seconds", 1.0))
+    if tail < delay:
+        raise JobError(errors.INVALID_JOB, "tail_seconds must not be below audio_delay_seconds")
+
+    subtitles = None
+    subtitles_raw = raw.get("subtitles")
+    if subtitles_raw:
+        cues = []
+        for i, cue in enumerate(subtitles_raw["cues"]):
+            if cue["end"] <= cue["start"]:
+                raise JobError(errors.INVALID_JOB, f"subtitles.cues.{i}: end must be above start")
+            cues.append(SubtitleCue(start=float(cue["start"]), end=float(cue["end"]), text=cue["text"]))
+        subtitles = Subtitles(cues=tuple(cues), style=_pick(subtitles_raw.get("style") or {}, SubtitleStyle))
+
+    return SlideshowJob(
+        version=raw["version"],
+        type="slideshow",
+        reference=raw["reference"],
+        slides=tuple(
+            Slide(
+                image_url=item["image"]["url"],
+                audio_url=item["audio"]["url"],
+                duration_seconds=float(item["duration_seconds"]) if item.get("duration_seconds") is not None else None,
+            )
+            for item in raw["slides"]
+        ),
+        frame=_pick(raw.get("frame") or {}, Frame),
+        fit=raw.get("fit", "contain"),
+        audio_delay_seconds=delay,
+        tail_seconds=tail,
+        transition_seconds=float(raw.get("transition_seconds", 0.5)),
+        subtitles=subtitles,
+        output=Output(url=raw["output"]["url"], content_type=raw["output"].get("content_type", "video/mp4")),
+        video=_pick(raw.get("video") or {}, SlideshowVideo),
+        limits=_pick(raw.get("limits") or {}, SlideshowLimits),
+    )
+
+
+def parse_job(raw: object) -> Job | IngestJob | ClipJob | SlideshowJob:
     if not isinstance(raw, dict):
         raise JobError(errors.INVALID_JOB, "job must be an object")
 
@@ -338,6 +446,8 @@ def parse_job(raw: object) -> Job | IngestJob | ClipJob:
         return _parse_ingest(raw)
     if job_type == "clip":
         return _parse_clip(raw)
+    if job_type == "slideshow":
+        return _parse_slideshow(raw)
 
     rules_raw = raw["rules"]
     rules = Rules(

@@ -1,0 +1,286 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/gitroomhq/postiz-uploader/schema/v1/slideshow.schema.json",
+  "title": "SlideshowJob",
+  "description": "Turn N (image, audio) pairs into one video: each slide shows its image for the length of its audio plus a tail, slides are joined with a crossfade, optional subtitles are burned in, and the result is PUT to one presigned URL.",
+  "type": "object",
+  "required": [
+    "version",
+    "type",
+    "reference",
+    "slides",
+    "output"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "type": {
+      "const": "slideshow"
+    },
+    "reference": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "slides": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "required": [
+          "image",
+          "audio"
+        ],
+        "properties": {
+          "image": {
+            "type": "object",
+            "required": [
+              "url"
+            ],
+            "properties": {
+              "url": {
+                "type": "string",
+                "format": "uri",
+                "pattern": "^https?://",
+                "description": "GET; png, jpeg or webp."
+              }
+            }
+          },
+          "audio": {
+            "type": "object",
+            "required": [
+              "url"
+            ],
+            "properties": {
+              "url": {
+                "type": "string",
+                "format": "uri",
+                "pattern": "^https?://",
+                "description": "GET; anything ffmpeg decodes (mp3, aac, wav, ogg)."
+              }
+            }
+          },
+          "duration_seconds": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "description": "How long the slide is shown. Default: the audio's duration plus tail_seconds. Audio past the end is cut."
+          }
+        }
+      }
+    },
+    "frame": {
+      "type": "object",
+      "properties": {
+        "width": {
+          "type": "integer",
+          "minimum": 16,
+          "maximum": 4096,
+          "multipleOf": 2,
+          "default": 1080
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 16,
+          "maximum": 4096,
+          "multipleOf": 2,
+          "default": 1920
+        }
+      }
+    },
+    "fit": {
+      "enum": [
+        "contain",
+        "cover"
+      ],
+      "default": "contain",
+      "description": "contain: the whole image, letterboxed in black. cover: fill the canvas and cut the overflow around the centre."
+    },
+    "audio_delay_seconds": {
+      "type": "number",
+      "minimum": 0,
+      "default": 0.5,
+      "description": "Silence before the audio starts on every slide."
+    },
+    "tail_seconds": {
+      "type": "number",
+      "minimum": 0,
+      "default": 1.0,
+      "description": "Added to the audio's duration to get the slide's default duration. It includes audio_delay_seconds, so the silence after the audio is tail_seconds - audio_delay_seconds; it must not be below audio_delay_seconds."
+    },
+    "transition_seconds": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 5,
+      "default": 0.5,
+      "description": "Crossfade between consecutive slides; 0 is a hard cut. Must be below every slide's duration."
+    },
+    "subtitles": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "required": [
+        "cues"
+      ],
+      "properties": {
+        "cues": {
+          "type": "array",
+          "maxItems": 1000,
+          "description": "On the OUTPUT timeline (crossfades already subtracted, see README 4.6). A cue past the end of the video is dropped, one straddling it is cut.",
+          "items": {
+            "type": "object",
+            "required": [
+              "start",
+              "end",
+              "text"
+            ],
+            "properties": {
+              "start": {
+                "type": "number",
+                "minimum": 0
+              },
+              "end": {
+                "type": "number",
+                "minimum": 0
+              },
+              "text": {
+                "type": "string",
+                "maxLength": 2000
+              }
+            }
+          }
+        },
+        "style": {
+          "type": "object",
+          "properties": {
+            "font": {
+              "type": "string",
+              "maxLength": 100,
+              "pattern": "^[^,{}\\\\\\n]+$",
+              "default": "Montserrat"
+            },
+            "bold": {
+              "type": "boolean",
+              "default": true
+            },
+            "font_size": {
+              "type": "integer",
+              "minimum": 8,
+              "maximum": 400,
+              "description": "Pixels on the output canvas. Default: 1/24 of the canvas height."
+            },
+            "color": {
+              "type": "string",
+              "pattern": "^#[0-9a-fA-F]{6}$",
+              "default": "#FFFFFF"
+            },
+            "outline_color": {
+              "type": "string",
+              "pattern": "^#[0-9a-fA-F]{6}$",
+              "default": "#000000"
+            },
+            "outline": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 20,
+              "default": 4
+            },
+            "shadow": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 20,
+              "default": 0
+            },
+            "position": {
+              "enum": [
+                "top",
+                "middle",
+                "bottom"
+              ],
+              "default": "middle"
+            },
+            "margin_v": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Pixels from the top or bottom edge. Default: 1/5 of the canvas height. Ignored for middle."
+            }
+          }
+        }
+      }
+    },
+    "output": {
+      "type": "object",
+      "required": [
+        "url"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https?://"
+        },
+        "content_type": {
+          "const": "video/mp4",
+          "default": "video/mp4"
+        }
+      }
+    },
+    "video": {
+      "type": "object",
+      "properties": {
+        "profile": {
+          "enum": [
+            "baseline",
+            "main",
+            "high"
+          ],
+          "default": "high"
+        },
+        "fps": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 60,
+          "default": 30
+        },
+        "quality": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 51,
+          "default": 23
+        },
+        "audio_bitrate_kbps": {
+          "type": "integer",
+          "minimum": 32,
+          "maximum": 512,
+          "default": 128
+        },
+        "audio_sample_rate": {
+          "type": "integer",
+          "enum": [
+            44100,
+            48000
+          ],
+          "default": 48000
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "properties": {
+        "max_input_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 104857600,
+          "description": "Per downloaded file."
+        },
+        "timeout_seconds": {
+          "type": "number",
+          "minimum": 10,
+          "default": 1200
+        }
+      }
+    }
+  }
+}

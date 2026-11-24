@@ -11,7 +11,8 @@ It also runs the two heavy steps of video clipping (sections 4.4 and 4.5): `inge
 fetches a long source once and produces a faststart MP4 plus a small audio track for
 speech-to-text, and `clip` cuts N segments out of a source, reframes them for vertical
 feeds and burns in word-timed captions. Transcription, choosing what to cut and
-scheduling the results are the caller's job.
+scheduling the results are the caller's job. And it renders `slideshow` jobs (section
+4.6): image and voice pairs joined with a crossfade and burned-in subtitles.
 
 The service knows nothing about Postiz. There are no media ids, no database, no storage
 credentials and no callbacks into any API. URLs in, metadata out. This is a deliberate
@@ -96,7 +97,8 @@ postiz_uploader/
   ingest.py  ytdlp.py         ingest stage; yt-dlp as a subprocess
   pot.py                      the PO token server yt-dlp's bgutil plugin asks
   oxylabs.py                  ingest via Oxylabs: metadata, captions, downloads into a bucket
-  clip.py  captions.py        clip stage; word timings -> ASS subtitles (pure)
+  clip.py  captions.py        clip stage; word timings and cues -> ASS subtitles (pure)
+  slideshow.py                slideshow stage; one part per slide, then crossfade + subtitles
   devserver.py                GET/PUT file server used by tests, compose and scripts
   devapi.py                   RunPod /run + /status stand-in for local callers
 schema/v1/                    job + result schemas per job type (vendored by the caller)
@@ -434,6 +436,74 @@ Schemas: `schema/v1/clip.schema.json` and `clip-result.schema.json`.
   + NVENC, libx264). Every filter here runs on the CPU, so CUDA only offloads the
   decode and encode. A rung that fails is dropped for the remaining clips of the job.
 
+### 4.6 Slideshow jobs (`type: "slideshow"`)
+
+Schemas: `schema/v1/slideshow.schema.json` and `slideshow-result.schema.json`. One
+video out of N (image, audio) pairs: the narrated picture slides a text-to-video
+feature produces.
+
+```jsonc
+{
+  "version": 1,
+  "type": "slideshow",
+  "reference": "video_42",
+  "slides": [                                  // 1 to 50, in order
+    {
+      "image": { "url": "<presigned GET>" },   // png, jpeg or webp
+      "audio": { "url": "<presigned GET>" },   // anything ffmpeg decodes (mp3, aac, wav, ogg)
+      "duration_seconds": 7.3                  // optional; default = audio duration + tail_seconds
+    }
+  ],
+  "frame": { "width": 1080, "height": 1920 },  // 1920x1080 for a horizontal video
+  "fit": "contain",                            // contain (letterboxed) | cover (cropped around the centre)
+  "audio_delay_seconds": 0.5,                  // silence before the audio of every slide
+  "tail_seconds": 1.0,                         // added to the audio's length; includes the delay
+  "transition_seconds": 0.5,                   // crossfade between slides, 0 = hard cut
+  "subtitles": {                               // optional
+    "cues": [ { "start": 0.0, "end": 7.3, "text": "..." } ],   // OUTPUT timeline, seconds
+    "style": { "font": "Montserrat", "position": "middle" }    // same fields as clip captions
+  },                                           // minus the per-word ones
+  "output": { "url": "<presigned PUT>" },      // video/mp4
+  "video": { "quality": 23, "fps": 30, "audio_bitrate_kbps": 128, "audio_sample_rate": 48000 },
+  "limits": { "max_input_bytes": 104857600, "timeout_seconds": 1200 }   // bytes are per file
+}
+```
+
+- **One part per slide, then one join.** Each slide is rendered to its own mp4 first:
+  the image looped for the slide's duration (`-loop 1`, scaled and padded or cropped
+  to the frame, `fps`, `yuv420p`), the audio resampled to stereo, delayed by
+  `audio_delay_seconds` (`adelay`) and padded with silence (`apad`) to exactly the
+  same length. The parts therefore share frame size, frame rate, pixel format and
+  codecs, which is what `xfade` needs. The join is one more encode: `xfade` and
+  `acrossfade` chained over the parts (or `concat` when `transition_seconds` is 0),
+  with the subtitles burned in by the `ass` filter in the same pass.
+- **Timeline.** A crossfade overlaps the end of one slide with the start of the next,
+  so with durations `d_k` and transition `t`:
+
+  ```
+  start_k = sum(d_0 .. d_(k-1)) - t * k
+  total   = sum(d_0 .. d_(n-1)) - t * (n - 1)
+  ```
+
+  The caller computes its cues with the same formula (`slideshow.timeline` is that
+  function). The default duration of a slide is its audio's length plus
+  `tail_seconds`, so with the defaults a slide is `audio + 1 s` long, the voice starts
+  0.5 s in and 0.5 s of silence follows it. `tail_seconds` below `audio_delay_seconds`
+  is `INVALID_JOB`; a `transition_seconds` that is not below every slide's duration
+  is `INVALID_JOB` too, reported after the audio was probed.
+- **Subtitles.** One ASS event per cue, plain text, wrapped by libass inside the
+  canvas margins. The style fields are the clip caption ones without the per-word
+  grouping and highlight; `position` defaults to `middle` and `font_size` to 1/24 of
+  the canvas height. A cue past `total` is dropped and one straddling it is cut, so a
+  caller whose arithmetic drifts by a frame does not fail the job. The result's
+  `output.subtitle_cues` says how many were burned in. Braces and backslashes are
+  neutralised as for captions.
+- **Encoder.** NVENC then libx264, as for clips, without the NVDEC rung (the inputs are
+  still images). A rung that fails is dropped for the rest of the job.
+- **Result.** `status` is `completed` or `failed`, there is no partial: the output is
+  one file and is uploaded only when every slide and the join succeeded. `output`
+  carries the probed facts plus `slides` and `subtitle_cues`.
+
 ---
 
 ## 5. Processing pipeline
@@ -669,6 +739,10 @@ runpod.serverless.start({
   decoder utilization alongside CPU.
 - The handler must be safe to run concurrently: everything is per-job and lives in
   the job's own directory. No module-level mutable state.
+- A slideshow holds a worker for a few minutes like a clip job does (up to 50 slides
+  are downloaded, rendered and joined, with two encodes of every frame), and it runs
+  on the normalization endpoint next to uploads. Its inputs are small, so the disk
+  check (`2 * max_input_bytes`, per file) is not what bounds it; the job timeout is.
 
 ---
 
@@ -781,6 +855,7 @@ the HDR test additionally needs `zscale`, which the Docker images have.
 | `small-exif-rotated.jpg` | upscale to 720 with orientation baked in |
 | `animated.gif` | `unchanged` |
 | `bomb.png` | decompression bomb, expect `UNSUPPORTED_INPUT` |
+| `slide-64.png`, `voice-1s.mp3` | slideshow inputs: a picture and a one second sine voice track (`voice-1s.wav` when the local ffmpeg has no `libmp3lame`) |
 
 ### 10.2 Tests
 
@@ -934,7 +1009,9 @@ Endpoint settings for production:
 | Region | closest to the R2 bucket's location hint | Download and upload are the only latency that matters. |
 
 **Two endpoints, one image.** Clipping runs on its own endpoint (`postiz-clipper`) with
-the same image tag. A clip job downloads up to 2 GB and renders for minutes; on a
+the same image tag. Slideshow jobs (4.6) share the normalization endpoint and its
+`ALLOWED_SOURCE_HOSTS`, which lists bucket hosts only: a caller whose slide images come
+from a generation API stages them in the bucket first and hands over presigned URLs. A clip job downloads up to 2 GB and renders for minutes; on a
 shared queue five of them would hold every worker while a person waits on a web
 upload. The split also keeps the settings honest:
 
@@ -1053,3 +1130,5 @@ For orientation only. None of this lives in this repo and none of it is built ye
    `h264_nvenc`, and a YouTube ingest succeeded on the direct route with no proxy
    (`proxied: false`). One video from one address proves little about bot checks at
    volume; `INGEST_PROXY` is still unset.
+8. **Done (0.4.0).** `slideshow` job type (4.6), replacing the Transloadit assembly
+   the caller's text-to-video feature used. Runs on the normalization endpoint.

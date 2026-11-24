@@ -1,15 +1,18 @@
-"""Word timings -> an ASS subtitle file for one clip. Pure: no I/O, no ffmpeg.
+"""Timings -> an ASS subtitle file. Pure: no I/O, no ffmpeg.
 
-Words arrive on the source timeline. They are sliced to the clip window, shifted so
-the clip starts at zero, grouped into short lines, and each line is emitted once per
-word with that word highlighted, which is the usual short-form caption look.
+`build_ass`: words arrive on the source timeline. They are sliced to the clip window,
+shifted so the clip starts at zero, grouped into short lines, and each line is emitted
+once per word with that word highlighted, which is the usual short-form caption look.
+
+`build_cue_ass`: cues already on the output timeline, one event each (a slideshow's
+subtitles).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from postiz_uploader.schema import CaptionStyle, Word
+from postiz_uploader.schema import CaptionStyle, SubtitleCue, SubtitleStyle, Word
 
 # a pause this long always starts a new line, so captions never hang over silence
 MAX_GAP_SECONDS = 0.8
@@ -97,16 +100,12 @@ def _text(line: Line, active: int | None, style: CaptionStyle) -> str:
     return " ".join(parts)
 
 
-def build_ass(words: tuple[Word, ...], style: CaptionStyle, *, start: float, end: float, width: int, height: int):
-    """Returns (ass document, number of caption lines). Zero lines means nothing to burn."""
-    duration = end - start
-    lines = group_lines(slice_words(words, start, end), style, duration)
-
+def _header(style: CaptionStyle | SubtitleStyle, *, width: int, height: int) -> list[str]:
     font_size = style.font_size or max(round(height / 24), 8)
     margin_v = style.margin_v if style.margin_v is not None else round(height / 5)
     if style.position == "middle":
         margin_v = 0
-    header = [
+    return [
         "[Script Info]",
         "ScriptType: v4.00+",
         f"PlayResX: {width}",
@@ -127,6 +126,14 @@ def build_ass(words: tuple[Word, ...], style: CaptionStyle, *, start: float, end
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ]
 
+
+def build_ass(words: tuple[Word, ...], style: CaptionStyle, *, start: float, end: float, width: int, height: int):
+    """Returns (ass document, number of caption lines). Zero lines means nothing to burn."""
+    duration = end - start
+    lines = group_lines(slice_words(words, start, end), style, duration)
+
+    header = _header(style, width=width, height=height)
+
     events = []
     for line in lines:
         if not style.highlight_color:
@@ -145,3 +152,17 @@ def build_ass(words: tuple[Word, ...], style: CaptionStyle, *, start: float, end
             )
 
     return "\n".join(header + events) + "\n", len(lines)
+
+
+def build_cue_ass(cues: tuple[SubtitleCue, ...], style: SubtitleStyle, *, width: int, height: int, total: float):
+    """Returns (ass document, number of cues kept). Cues are clamped to [0, total]; one
+    that starts past the end is dropped. Zero cues means nothing to burn."""
+    events = []
+    for cue in sorted(cues, key=lambda c: c.start):
+        start, end = max(cue.start, 0.0), min(cue.end, total)
+        text = _escape(cue.text).strip()
+        if end <= start or not text:
+            continue
+        events.append(f"Dialogue: 0,{_timestamp(start)},{_timestamp(end)},Default,,0,0,0,,{text}")
+    header = _header(style, width=width, height=height)
+    return "\n".join(header + events) + "\n", len(events)
