@@ -1041,7 +1041,8 @@ testing (section 10.5).
    Until it does, a job can still land on a worker running the old image, so deploy a
    caller change that needs the new image only after every worker on the endpoint
    runs it.
-6. To roll back, point the endpoints at the previous tag the same way.
+6. To roll back, first revert or turn off any caller change that needs the new image,
+   then point the endpoints at the previous tag the same way.
 
 Never point production at a tag that has not passed CI, and never at an rc tag.
 
