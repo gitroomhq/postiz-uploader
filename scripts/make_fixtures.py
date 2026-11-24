@@ -79,6 +79,24 @@ def make(out_dir: str) -> dict[str, str]:
     _video(p("slowmo-120fps.mp4"), 1920, 1080, fps=120, vcodec=x264)
     _video(p("ultrawide-2560x1080.mp4"), 2560, 1080, vcodec=x264)
     _video(p("small-480p-h264.mp4"), 854, 480, vcodec=x264)
+    # full colour range, which ffprobe reports as yuvj420p
+    _video(
+        p("full-range-1080p.mp4"),
+        1920,
+        1080,
+        vcodec=[
+            "-vf",
+            "scale=out_range=pc,format=yuvj420p",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-color_range",
+            "pc",
+            "-profile:v",
+            "high",
+        ],
+    )
     # long enough to cut several clips out of; testsrc2 burns a running timecode in
     _video(p("talk-8s.mp4"), 1280, 720, vcodec=x264, duration="8")
     # display matrix like an iPhone portrait clip: 1920x1080 stored, shown as 1080x1920.

@@ -173,11 +173,11 @@ def build_encode(
     """One ffmpeg invocation for an ENCODE plan.
 
     cuda_decode keeps decode, rotate and scale on the GPU (frames never leave GPU
-    memory). It is only valid with the nvenc encoder and never with tone mapping,
-    which runs on the CPU chain.
+    memory). It is only valid with the nvenc encoder and never with tone mapping
+    or a full-range source, which run on the CPU chain.
     """
-    if cuda_decode and (encoder != "h264_nvenc" or plan.tonemap):
-        raise ValueError("cuda_decode requires h264_nvenc and no tone mapping")
+    if cuda_decode and (encoder != "h264_nvenc" or plan.tonemap or info.full_range):
+        raise ValueError("cuda_decode requires h264_nvenc, no tone mapping and a limited-range source")
 
     cmd = [ffmpeg_bin, *BASE_ARGS]
     if cuda_decode:
@@ -209,6 +209,9 @@ def build_encode(
             if plan.tonemap:
                 filters.append(TONEMAP_CPU)
             else:
+                if info.full_range:
+                    # format= keeps the full-range flag, and the output then probes as yuvj420p
+                    filters.append("scale=out_range=tv")
                 filters.append(f"format={rules.pixel_format}")
         cmd += ["-vf", ",".join(filters)]
 

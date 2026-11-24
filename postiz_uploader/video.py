@@ -47,7 +47,8 @@ def _run_encode(
     # (encoder, cuda decode) in the order they are tried
     attempts: list[tuple[str, bool]] = []
     if settings.gpu and plan.video_encode:
-        if not plan.tonemap:
+        # scale_npp cannot convert the colour range, so full-range sources skip CUDA decode
+        if not plan.tonemap and not info.full_range:
             attempts.append((settings.encoder, True))
         attempts.append((settings.encoder, False))
         attempts.append(("libx264", False))
