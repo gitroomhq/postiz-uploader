@@ -788,7 +788,8 @@ the HDR test additionally needs `zscale`, which the Docker images have.
   Every row above has a planner test asserting the expected `actions`.
 - **Integration**: run the full pipeline on each fixture against a local HTTP server
   that serves the source and accepts PUTs, and assert the post-check plus the result
-  document. Runs on the `cpu` image in CI.
+  document. Runs in CI on the runner, with the distribution's ffmpeg, before the images
+  are built.
 - **Contract**: JSON schema files for Job and Result under `schema/v1/`, validated in
   tests. The caller repo will vendor these files.
 
@@ -853,8 +854,64 @@ docker compose up --build                                  # worker API on :8000
   `output`) or `FAILED` (with `error`). Results are kept 30 minutes, an unknown id is a
   404, and the paths take an optional `/v2/<endpoint>` prefix, so a caller swaps only
   the host. It does not reproduce RunPod's queue, autoscaling or GPU workers; check
-  those on a non-production endpoint. Dev tooling: the image still starts
+  those on the test endpoints (section 10.5). Dev tooling: the image still starts
   `handler.py`, and nothing in production imports this module.
+
+### 10.5 Cloud and GPU testing
+
+Three test endpoints mirror the production ones, with the same compute and min 0 /
+max 2 workers:
+
+| test endpoint | id | mirrors | image |
+|---|---|---|---|
+| `postiz-uploader-test` | `b46mu205oxwz98` | `postiz-uploader` (normalization) | `-gpu` |
+| `postiz-clipper-test` | `8akzwxszsvxsuo` | `postiz-clipper` | `-gpu` |
+| `postiz-ingest-test` | `ji2fys1kousjz4` | `postiz-ingest` | `-cpu` |
+
+A separate RunPod API key reaches only these three endpoints, as the production key
+reaches only the production ones. Get the test key from a team member, like other keys;
+it never goes in this repo.
+
+An endpoint runs one image at a time, so before using a test endpoint say so in the
+team's channel, and say when you are done.
+
+**Running a local Postiz against them.** In postiz-app's `.env`, set `RUNPOD_API_KEY`
+to the test key, and `RUNPOD_ENDPOINT_ID`, `RUNPOD_INGEST_ENDPOINT_ID` and
+`RUNPOD_CLIPPER_ENDPOINT_ID` to the test ids. Leave `RUNPOD_API_URL` unset, or start
+the app with `RUNPOD_API_URL=` (empty) on the command line to override a local
+`devapi` value in `.env`; Postiz then uses `https://api.runpod.ai/v2`. Postiz must be
+on R2: the test endpoints allow `*.r2.cloudflarestorage.com` as a source.
+
+**Deploying a branch.**
+
+1. Push a pre-release tag from the branch, for example `v0.4.0-rc1`. CI runs the suite
+   and pushes `0.4.0-rc1-cpu` and `0.4.0-rc1-gpu` to `ghcr.io/gitroomhq/postiz-uploader`.
+   Use a new rc number for every build, never reuse a tag, and keep the git rc tags
+   afterwards so every rc image traces to a commit.
+2. Point the test endpoint at the rc tag, then set its max workers to 0 until no
+   workers are left and restore it to 2, so no worker on the old image takes a job.
+3. Run the flow from Postiz.
+
+RunPod lowers an endpoint's max workers after a week without requests. If a test job
+stays `IN_QUEUE`, check that max workers is still 2.
+
+**When testing is done**, in this order:
+
+1. Point each test endpoint you used back at the image its production mirror runs
+   now (check the production endpoint; do not assume a tag), and drain it the same way.
+2. Confirm in the RunPod console that no test endpoint still names an rc tag. A test
+   endpoint must never point at a deleted image.
+3. Only then delete the rc images.
+
+**Deleting rc images is manual only:** a person deletes them on the GHCR package page,
+never an agent, a script or the CLI. The rc images share the package with the
+production images, and deleting the wrong version breaks production. Each rc tag also
+leaves untagged versions (the platform image and its attestation). Delete those too,
+but only the ones under the rc tag:
+`docker buildx imagetools inspect --raw ghcr.io/gitroomhq/postiz-uploader:<rc tag>`
+lists their digests (read only). Never delete any other untagged version: the
+release tags are backed by untagged versions, and deleting one breaks the images
+production runs.
 
 ---
 
@@ -889,10 +946,43 @@ upload. The split also keeps the settings honest:
 | `INGEST_PROXY` | unset | the proxy, only here |
 | Container disk | 50 GB | 50 GB |
 
-Release flow: GitHub Actions builds both images on a tag, pushes to GHCR, runs the
-integration suite on the CPU image, and the endpoint's image tag is updated by hand (or
-by the RunPod API in a later iteration). Never point production at a tag that has not
-passed the suite.
+Each production endpoint has a test mirror with the same compute, used only for
+testing (section 10.5).
+
+**Releasing**, after the change is merged to `main`:
+
+1. Make sure `version` in `pyproject.toml` and `__version__` in
+   `postiz_uploader/__init__.py` are the version you are releasing. Every result
+   reports it.
+2. Tag that commit and push the tag: `git tag v<version>`, `git push origin v<version>`.
+3. Wait for the `ci` run on the tag to pass: it runs the suite, then pushes
+   `<version>-cpu` and `<version>-gpu` to GHCR. Check both on the package page.
+4. Point the endpoints that serve the changed feature at the new images by hand.
+5. Don't drain production endpoints: RunPod rolls the change out, and busy workers
+   finish their job on the old image first. Draining an endpoint that keeps a warm
+   worker would stop its traffic. Watch the rollout reach 100% in the console.
+6. To roll back, point the endpoints at the previous tag the same way.
+
+Never point production at a tag that has not passed CI, and never at an rc tag.
+
+**Which endpoints to update.** Every image handles every job type, and how job types
+map to endpoints is a deployment choice: another deployment may, for example, give
+image jobs an endpoint of their own. Update the endpoints whose job types the change
+touches. Update the others only when the change requires it, for example a shared
+contract change. An updated endpoint runs the new image for every job type it serves,
+so implement and test a change so that it does not break any other job type on the
+same endpoint.
+
+Postiz's endpoints:
+
+| endpoint | job types | image |
+|---|---|---|
+| `postiz-uploader` | `video`, `image` (normalization) | `-gpu` |
+| `postiz-clipper` | `clip` | `-gpu` |
+| `postiz-ingest` | `ingest` | `-cpu` |
+
+So for Postiz, a change to `video` jobs must not break `image` jobs and the other way
+round, since deploying either one deploys both.
 
 ---
 
